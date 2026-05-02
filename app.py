@@ -10,7 +10,7 @@ import ast
 from fpdf import FPDF
 
 # --- Importa as nossas próprias funções locais ---
-from api_functions import *
+from app_functions import *
 API_INSTALADA = True
 
 # ==========================================
