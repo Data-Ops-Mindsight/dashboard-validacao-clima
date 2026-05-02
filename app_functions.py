@@ -30,9 +30,9 @@ def get_dataframe_from_api(
     **kwargs
 ) -> pd.DataFrame:
     """
-    Faz a requisição para a API da Mindsight e lida automaticamente com a paginação.
+    Faz a requisição para a API da Mindsight, lida automaticamente com a paginação
+    e "achata" os dados JSON aninhados em formato de tabela (DataFrame).
     """
-    # ⬇️ AQUI ESTÁ A CORREÇÃO DA URL (/api/v1/) ⬇️
     base_url = f"https://{system}.mindsight.com.br/{tenant}/api/v1/{endpoint}/"
     
     if not base_url.endswith('/') and '?' not in base_url:
@@ -76,7 +76,10 @@ def get_dataframe_from_api(
         st.error(f"🚨 Erro interno de conexão (`{system}`): {e}")
         return pd.DataFrame()
         
-    return pd.DataFrame(all_data)
+    # ⬇️ A CORREÇÃO MÁGICA: json_normalize() converte dicts aninhados em colunas planas! ⬇️
+    if not all_data:
+        return pd.DataFrame()
+    return pd.json_normalize(all_data)
 
 
 # ==========================================
