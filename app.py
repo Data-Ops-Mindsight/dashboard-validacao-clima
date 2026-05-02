@@ -763,30 +763,33 @@ with aba_clima:
         nome_pesquisa = "Nome Indisponível"
         df_choice = pd.DataFrame()
 
-        # --- LÓGICA DE FILTRO SEGURA DA SURVEY ---
+        # Pegar o nome da campanha atual para o KPI
+        if not df_camp.empty and 'id' in df_camp.columns:
+            pesquisa_atual = df_camp[df_camp['id'].astype(str) == str(id_campanha).strip()]
+            if not pesquisa_atual.empty and 'name' in pesquisa_atual.columns:
+                nome_pesquisa = pesquisa_atual['name'].values[0]
+
+        # --- EXATAMENTE A SUA LÓGICA DE FILTRO ---
         try:
-            if not df_camp.empty and 'id' in df_camp.columns:
-                pesquisa_atual = df_camp[df_camp['id'].astype(str) == str(id_campanha).strip()]
-                if not pesquisa_atual.empty:
-                    if 'name' in pesquisa_atual.columns:
-                        nome_pesquisa = pesquisa_atual['name'].values[0]
+            if not df_survey_full.empty and 'id' in df_survey_full.columns:
+                # 1. Filtra a survey pelo id da campanha
+                df_survey_filtrado = df_survey_full.loc[df_survey_full['id'] == int(id_campanha)]
+                
+                if not df_survey_filtrado.empty and 'questions.title' in df_survey_filtrado.columns:
+                    # 2. Pega os títulos das perguntas
+                    lista_titulos_validos = df_survey_filtrado['questions.title'].dropna().unique().tolist()
                     
-                    if not df_survey_full.empty and 'questions.title' in df_survey_full.columns:
-                        lista_titulos_validos = df_survey_full['questions.title'].dropna().unique().tolist()
-                        
-                        if not df_choice_total.empty and 'title' in df_choice_total.columns:
-                            # Filtra as choices para validar apenas as perguntas que estão na Survey
-                            df_choice = df_choice_total[df_choice_total['title'].isin(lista_titulos_validos)].copy()
-                        else:
-                            st.warning("A base de perguntas (choices) puxada da API está vazia ou mal formatada.")
+                    if not df_choice_total.empty and 'title' in df_choice_total.columns:
+                        # 3. Filtra as choices
+                        df_choice = df_choice_total[df_choice_total['title'].isin(lista_titulos_validos)].copy()
                     else:
-                        st.warning("Não foram encontradas perguntas associadas à estrutura desta Survey (ou a tabela está vazia).")
+                        st.warning("A base de perguntas (choices) puxada da API está vazia.")
                 else:
-                    st.error(f"Nenhuma campanha encontrada com o ID {id_campanha}.")
+                    st.warning("Não foram encontradas perguntas associadas à estrutura desta Survey ou a coluna questions.title está ausente.")
             else:
-                st.error("A base de campanhas está vazia ou sem a coluna 'id'.")
+                st.error("A tabela de Surveys (survey_admin) está vazia ou sem a coluna 'id'.")
         except Exception as e:
-            st.error(f"🚨 Erro inesperado ao filtrar as perguntas da campanha: {e}")
+            st.error(f"🚨 Erro inesperado ao aplicar o filtro de perguntas: {e}")
 
         # Tratamento seguro de colunas de contato
         if 'email' not in df_contatos.columns: df_contatos['email'] = ''
