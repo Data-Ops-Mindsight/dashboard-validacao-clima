@@ -1,6 +1,7 @@
 import pandas as pd
 import requests
 import io
+import json
 from typing import Optional
 
 # ==========================================
@@ -228,32 +229,39 @@ def get_pesquisa_contact_api(tenant: str, token: str, campaign_id: int, page_siz
 def get_pesquisa_survey_api(
     tenant: str,
     token: str,
-    page_size: Optional[int] = None,
-    max_workers: Optional[int] = None,
-    parallel: bool = True,
-    ignore_page_size_limits: bool = False
+    survey_id: Optional[int] = None, # <--- Adicionamos esse parâmetro
+    page_size: Optional[int] = None
 ) -> pd.DataFrame:
     """
-    Obtém informações das pesquisas via API e explode as perguntas para formato plano.
+    Obtém informações detalhadas de uma pesquisa ou da lista de pesquisas.
     """
-    standard_columns = ['id', 'title', 'description', 'questions.title', 'questions.type']
+    # Se passarmos o ID, vamos direto no endpoint de detalhes daquela survey
+    endpoint = f"survey_admin/{survey_id}" if survey_id else "survey_admin"
     
-    # Busca os dados do endpoint survey_admin
-    df_survey_api = get_dataframe_from_api('pesquisa', tenant, 'survey_admin', token, page_size)
+    # Faz a requisição bruta
+    df_raw = get_dataframe_from_api('pesquisa', tenant, endpoint, token, page_size)
     
-    if df_survey_api.empty:
-        return pd.DataFrame(columns=standard_columns)
+    if df_raw.empty:
+        return pd.DataFrame()
     
-    # Processamento para extrair as perguntas aninhadas
-    # Explodimos a coluna 'questions' que contém a lista de dicts
-    df_survey_api = df_survey_api.explode('questions')
-    
-    # Resetamos o index para evitar problemas no normalize
-    df_survey_api = df_survey_api.reset_index(drop=True)
-    
-    # Normalizamos o campo questions (que agora é um dict por linha)
-    # Usamos o método to_json/loads para garantir que o normalize trate corretamente o objeto
-    json_survey_api = df_survey_api.to_json(orient='records')
-    df_survey_api = pd.json_normalize(json.loads(json_survey_api))
-    
-    return df_survey_api
+    # Se o retorno for de uma survey específica, a coluna 'questions' estará presente
+    if 'questions' in df_raw.columns:
+        # Explodimos a lista de perguntas para que cada pergunta vire uma linha
+        df_exploded = df_raw.explode('questions').reset_index(drop=True)
+        
+        # Como 'questions' é um dicionário, precisamos achatar esses dados
+        # Usamos uma técnica segura de conversão
+        questions_list = df_exploded['questions'].tolist()
+        # Filtra apenas o que for dicionário válido
+        questions_list = [q for q in questions_list if isinstance(q, dict)]
+        
+        if questions_list:
+            df_questions = pd.json_normalize(questions_list)
+            # Adiciona o prefixo 'questions.' para manter compatibilidade com o seu app.py
+            df_questions.columns = [f"questions.{c}" for c in df_questions.columns]
+            
+            # Junta os dados da Survey (id, titulo) com os dados das perguntas
+            df_final = pd.concat([df_exploded[['id', 'title']].reset_index(drop=True), df_questions], axis=1)
+            return df_final
+
+    return df_raw
