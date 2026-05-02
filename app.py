@@ -10,8 +10,11 @@ import ast
 from fpdf import FPDF
 
 # --- Importa as nossas próprias funções locais ---
-from app_functions import *
-API_INSTALADA = True
+try:
+    from app_functions import *
+    API_INSTALADA = True
+except ImportError:
+    API_INSTALADA = False
 
 # ==========================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -203,7 +206,7 @@ with aba_estrutura:
     st.header("🌳 Validação de Estrutura Organizacional")
     
     if not API_INSTALADA:
-        st.error("🚨 Biblioteca `mindsight_api_requests` não encontrada! Instale-a no terminal para usar a API.")
+        st.error("🚨 O arquivo de funções (`app_functions.py`) não foi encontrado!")
         st.stop()
     
     data_pesquisa = st.date_input("Selecione a Data da Pesquisa para Validação")
@@ -267,30 +270,44 @@ with aba_estrutura:
                 progresso_visual.empty()
 
     if st.session_state.get('dados_carregados'):
-        df_areas_func = st.session_state['df_areas_func']
-        df_hierarquia = st.session_state['df_hierarquia']
-        df_instancias = st.session_state['df_instancias']
-        df_funcionarios = st.session_state['df_funcionarios']
-        df_reg_func = st.session_state['df_reg_func']
-        df_gestores = st.session_state['df_gestores']
+        df_areas_func = st.session_state.get('df_areas_func', pd.DataFrame())
+        df_hierarquia = st.session_state.get('df_hierarquia', pd.DataFrame())
+        df_instancias = st.session_state.get('df_instancias', pd.DataFrame())
+        df_funcionarios = st.session_state.get('df_funcionarios', pd.DataFrame())
+        df_reg_func = st.session_state.get('df_reg_func', pd.DataFrame())
+        df_gestores = st.session_state.get('df_gestores', pd.DataFrame())
         
         df_areas_func_filtrado = filtrar_por_data(df_areas_func, data_pesquisa)
         df_hierarquia_filtrado = filtrar_por_data(df_hierarquia, data_pesquisa)
         df_reg_func_filtrado = filtrar_por_data(df_reg_func, data_pesquisa)
         df_gestores_filtrado = filtrar_por_data(df_gestores, data_pesquisa)
 
-        df_funcionarios['Nome Completo'] = df_funcionarios['first_name'].fillna('') + " " + df_funcionarios['last_name'].fillna('')
-        mapa_nomes_func = dict(zip(df_funcionarios['id'], df_funcionarios['Nome Completo']))
-        ativos_ids = set(df_reg_func_filtrado['person'].dropna().unique())
-        mapa_datas_inicio = df_reg_func_filtrado.groupby('person')['start_date'].max().dt.strftime('%d/%m/%Y').to_dict()
+        # -- CRIAÇÃO SEGURA DA COLUNA 'NOME COMPLETO' --
+        if 'name' in df_funcionarios.columns:
+            df_funcionarios['Nome Completo'] = df_funcionarios['name'].fillna('Desconhecido')
+        else:
+            primeiro_nome = df_funcionarios.get('first_name', pd.Series(dtype=str)).fillna('')
+            ultimo_nome = df_funcionarios.get('last_name', pd.Series(dtype=str)).fillna('')
+            df_funcionarios['Nome Completo'] = (primeiro_nome + " " + ultimo_nome).str.strip()
+            df_funcionarios['Nome Completo'] = df_funcionarios['Nome Completo'].replace('', 'Desconhecido')
 
-        mapa_nome_para_id = dict(zip(df_instancias['name'], df_instancias['id']))
+        id_col = df_funcionarios.get('id', pd.Series(dtype=str))
+        nome_col = df_funcionarios.get('Nome Completo', pd.Series(dtype=str))
+        mapa_nomes_func = dict(zip(id_col, nome_col))
+        
+        ativos_ids = set(df_reg_func_filtrado.get('person', pd.Series()).dropna().unique())
+        
+        mapa_datas_inicio = {}
+        if 'person' in df_reg_func_filtrado.columns and 'start_date' in df_reg_func_filtrado.columns:
+            mapa_datas_inicio = df_reg_func_filtrado.groupby('person')['start_date'].max().dt.strftime('%d/%m/%Y').to_dict()
+
+        mapa_nome_para_id = dict(zip(df_instancias.get('name', []), df_instancias.get('id', [])))
         def traduzir_area_para_id(val):
             if isinstance(val, str) and val in mapa_nome_para_id:
                 return mapa_nome_para_id[val]
             return val 
 
-        df_areas_func_filtrado['area_id'] = df_areas_func_filtrado['area'].apply(traduzir_area_para_id)
+        df_areas_func_filtrado['area_id'] = df_areas_func_filtrado.get('area', pd.Series()).apply(traduzir_area_para_id)
 
         # ==================================
         # KPIs EXECUTIVOS
@@ -299,23 +316,29 @@ with aba_estrutura:
         col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
         col_kpi1.metric("👥 Total Colaboradores Ativos", len(ativos_ids))
         col_kpi2.metric("🏢 Total de Áreas Identificadas", len(df_instancias))
-        col_kpi3.metric("👔 Total de Gestores Identificados", len(df_gestores_filtrado['manager'].dropna().unique()))
+        
+        total_gestores = len(df_gestores_filtrado['manager'].dropna().unique()) if 'manager' in df_gestores_filtrado.columns else 0
+        col_kpi3.metric("👔 Total de Gestores Identificados", total_gestores)
 
         # --- 1. ÁREAS ---
         st.markdown("---")
         st.subheader("1. Validação de Hierarquia de Áreas")
         
-        mapa_nomes_areas = dict(zip(df_instancias['id'], df_instancias['name']))
-        contagem_direta_areas = df_areas_func_filtrado.groupby('area_id')['person'].nunique().to_dict()
+        mapa_nomes_areas = dict(zip(df_instancias.get('id', []), df_instancias.get('name', [])))
+        
+        contagem_direta_areas = {}
+        if 'area_id' in df_areas_func_filtrado.columns and 'person' in df_areas_func_filtrado.columns:
+            contagem_direta_areas = df_areas_func_filtrado.groupby('area_id')['person'].nunique().to_dict()
 
         G_areas = nx.DiGraph()
-        all_defined_area_ids = df_instancias['id'].unique()
+        all_defined_area_ids = df_instancias.get('id', pd.Series()).unique()
         G_areas.add_nodes_from(all_defined_area_ids)
 
-        for _, row in df_hierarquia_filtrado.iterrows():
-            parent, row_area = row['parent'], row['area']
-            if pd.notna(parent) and pd.notna(row_area):
-                G_areas.add_edge(parent, row_area)
+        if 'parent' in df_hierarquia_filtrado.columns and 'area' in df_hierarquia_filtrado.columns:
+            for _, row in df_hierarquia_filtrado.iterrows():
+                parent, row_area = row['parent'], row['area']
+                if pd.notna(parent) and pd.notna(row_area):
+                    G_areas.add_edge(parent, row_area)
                 
         for area_id in contagem_direta_areas.keys():
             if not G_areas.has_node(area_id):
@@ -409,14 +432,18 @@ with aba_estrutura:
                 render_tree_areas(raiz, level=0)
 
         st.markdown("**⚠️ Funcionários Ativos sem Área Vinculada**")
-        com_area_ids = set(df_areas_func_filtrado['person'].dropna().unique())
+        
+        com_area_ids = set(df_areas_func_filtrado.get('person', pd.Series()).dropna().unique())
         sem_area_ids = ativos_ids - com_area_ids
         
         df_exibicao_area = pd.DataFrame(columns=['Nome Completo', 'email', 'Data de Início'])
         if sem_area_ids:
             st.warning(f"**{len(sem_area_ids)}** funcionário(s) com contrato ativo sem área vinculada nesta data.")
             df_func_sem_area = df_funcionarios[df_funcionarios['id'].isin(sem_area_ids)].copy()
-            df_func_sem_area['Data de Início'] = df_func_sem_area['id'].map(mapa_datas_inicio)
+            df_func_sem_area['Data de Início'] = df_func_sem_area.get('id', pd.Series()).map(mapa_datas_inicio)
+            
+            # Garantir as colunas antes de exibir
+            if 'email' not in df_func_sem_area.columns: df_func_sem_area['email'] = ''
             df_exibicao_area = df_func_sem_area[['Nome Completo', 'email', 'Data de Início']]
             
             st.dataframe(df_exibicao_area.style.apply(cor_fundo_erro, axis=1), width='stretch', hide_index=True)
@@ -427,17 +454,19 @@ with aba_estrutura:
         st.markdown("---")
         st.subheader("2. Validação de Hierarquia de Gestores")
 
-        contagem_direta_gestores = df_gestores_filtrado.groupby('manager')['person'].nunique().to_dict()
-
+        contagem_direta_gestores = {}
         G_gestores = nx.DiGraph()
-        for _, row in df_gestores_filtrado.iterrows():
-            gestor, subordinado = row['manager'], row['person']
-            if pd.notna(gestor) and pd.notna(subordinado):
-                G_gestores.add_edge(gestor, subordinado)
-                
-        for subordinado in df_gestores_filtrado['person'].dropna().unique():
-            if not G_gestores.has_node(subordinado):
-                G_gestores.add_node(subordinado)
+
+        if 'manager' in df_gestores_filtrado.columns and 'person' in df_gestores_filtrado.columns:
+            contagem_direta_gestores = df_gestores_filtrado.groupby('manager')['person'].nunique().to_dict()
+            for _, row in df_gestores_filtrado.iterrows():
+                gestor, subordinado = row['manager'], row['person']
+                if pd.notna(gestor) and pd.notna(subordinado):
+                    G_gestores.add_edge(gestor, subordinado)
+                    
+            for subordinado in df_gestores_filtrado['person'].dropna().unique():
+                if not G_gestores.has_node(subordinado):
+                    G_gestores.add_node(subordinado)
 
         ciclos_gestores = list(nx.simple_cycles(G_gestores))
         if ciclos_gestores:
@@ -527,7 +556,7 @@ with aba_estrutura:
 
         st.markdown("**⚠️ Funcionários Ativos sem Gestor Vinculado**")
         
-        com_gestor_ids = set(df_gestores_filtrado['person'].dropna().unique())
+        com_gestor_ids = set(df_gestores_filtrado.get('person', pd.Series()).dropna().unique())
         sem_gestor_ids = ativos_ids - com_gestor_ids
         
         df_exibicao_gestor = pd.DataFrame(columns=['Nome Completo', 'email', 'Data de Início', 'É Topo de Cadeia?'])
@@ -535,8 +564,10 @@ with aba_estrutura:
             st.warning(f"**{len(sem_gestor_ids)}** funcionário(s) com contrato ativo sem gestor superior nesta data.")
             
             df_func_sem_gestor = df_funcionarios[df_funcionarios['id'].isin(sem_gestor_ids)].copy()
-            df_func_sem_gestor['Data de Início'] = df_func_sem_gestor['id'].map(mapa_datas_inicio)
-            df_func_sem_gestor['É Topo de Cadeia?'] = df_func_sem_gestor['id'].apply(lambda x: "Sim" if x in gestores_raiz else "Não")
+            df_func_sem_gestor['Data de Início'] = df_func_sem_gestor.get('id', pd.Series()).map(mapa_datas_inicio)
+            df_func_sem_gestor['É Topo de Cadeia?'] = df_func_sem_gestor.get('id', pd.Series()).apply(lambda x: "Sim" if x in gestores_raiz else "Não")
+            
+            if 'email' not in df_func_sem_gestor.columns: df_func_sem_gestor['email'] = ''
             df_exibicao_gestor = df_func_sem_gestor[['Nome Completo', 'email', 'Data de Início', 'É Topo de Cadeia?']]
             
             st.dataframe(df_exibicao_gestor.style.apply(cor_fundo_erro, axis=1), width='stretch', hide_index=True)
@@ -615,7 +646,7 @@ with aba_estrutura:
             pdf.cell(200, 10, txt="Nenhuma pendencia encontrada.", ln=True)
         else:
             for _, row in df_exibicao_area.iterrows():
-                texto = f"- {row['Nome Completo']} | E-mail: {row['email']} | Inicio: {row['Data de Início']}"
+                texto = f"- {row['Nome Completo']} | E-mail: {row.get('email','')} | Inicio: {row['Data de Início']}"
                 pdf.cell(200, 6, txt=remover_acentos(texto), ln=True)
         
         pdf.ln(10)
@@ -627,7 +658,7 @@ with aba_estrutura:
             pdf.cell(200, 10, txt="Nenhuma pendencia encontrada.", ln=True)
         else:
             for _, row in df_exibicao_gestor.iterrows():
-                texto = f"- {row['Nome Completo']} | E-mail: {row['email']} | Inicio: {row['Data de Início']} | Topo: {row['É Topo de Cadeia?']}"
+                texto = f"- {row['Nome Completo']} | E-mail: {row.get('email','')} | Inicio: {row['Data de Início']} | Topo: {row['É Topo de Cadeia?']}"
                 pdf.cell(200, 6, txt=remover_acentos(texto), ln=True)
                 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -838,7 +869,7 @@ with aba_estrutura:
                 nome = safe_html(mapa_nomes_func.get(node, f"ID {node}"))
                 qtd = calcular_total_gestores_seguro(node)
                 email = ""
-                df_f = df_funcionarios[df_funcionarios['id'] == node]
+                df_f = df_funcionarios[df_funcionarios.get('id') == node]
                 if not df_f.empty and 'email' in df_f.columns:
                     val = df_f['email'].values[0]
                     if pd.notna(val): email = safe_html(val)
@@ -888,7 +919,7 @@ with aba_clima:
     st.header("🌤️ Validação da Estrutura da Pesquisa de Clima")
     
     if not API_INSTALADA:
-        st.error("🚨 Biblioteca `mindsight_api_requests` não encontrada! Instale-a no terminal para usar a API.")
+        st.error("🚨 O arquivo de funções (`app_functions.py`) não foi encontrado!")
         st.stop()
 
     st.markdown("### 📥 Importação de Bases da Pesquisa")
@@ -939,14 +970,17 @@ with aba_clima:
                 progresso_clima.empty()
 
     if st.session_state.get('dados_clima_carregados'):
-        df_camp = st.session_state['df_pesquisa_camp']
-        df_choice = st.session_state['df_pesquisa_choice']
-        df_contatos = st.session_state['df_pesquisa_contatos']
-        df_func = st.session_state['df_funcionarios']
+        df_camp = st.session_state.get('df_pesquisa_camp', pd.DataFrame())
+        df_choice = st.session_state.get('df_pesquisa_choice', pd.DataFrame())
+        df_contatos = st.session_state.get('df_pesquisa_contatos', pd.DataFrame())
+        df_func = st.session_state.get('df_funcionarios', pd.DataFrame())
 
         try:
-            pesquisa_atual = df_camp.loc[df_camp['id'] == int(id_campanha)] if not df_camp.empty else pd.DataFrame()
-            nome_pesquisa = pesquisa_atual['name'].values[0] if not pesquisa_atual.empty else "Nome Indisponível"
+            if not df_camp.empty and 'id' in df_camp.columns:
+                pesquisa_atual = df_camp.loc[df_camp['id'] == int(id_campanha)]
+                nome_pesquisa = pesquisa_atual['name'].values[0] if not pesquisa_atual.empty else "Nome Indisponível"
+            else:
+                nome_pesquisa = "Nome Indisponível"
         except:
             nome_pesquisa = "Nome Indisponível"
 
@@ -962,7 +996,6 @@ with aba_clima:
         # --- KPIs CLIMA ---
         col_kpi1_c, col_kpi2_c = st.columns(2)
         
-        # Bloco HTML personalizado para o Nome da Pesquisa não ser cortado
         col_kpi1_c.markdown(f"""
             <div style="display: flex; flex-direction: column; gap: 0.2rem;">
                 <p style="font-size: 0.9rem; color: #b0b0b0; margin: 0; padding: 0;">📋 Nome da Pesquisa</p>
@@ -978,6 +1011,9 @@ with aba_clima:
         st.markdown("---")
         st.subheader("1. Validação de Contatos no People Hub")
 
+        if 'Nome Completo' not in df_func.columns: 
+            df_func['Nome Completo'] = df_func.get('name', pd.Series(dtype=str)).fillna('')
+
         df_func['email_clean'] = df_func['email'].astype(str).str.lower().str.strip()
         df_func['nome_clean'] = df_func['Nome Completo'].astype(str).str.lower().str.strip()
         
@@ -989,30 +1025,36 @@ with aba_clima:
         dict_nome_hub = df_func.drop_duplicates('nome_clean').set_index('nome_clean').to_dict('index')
         
         mapa_instancias = {}
-        for _, row in st.session_state['df_instancias'].iterrows():
-            id_str = clean_val(row.get('id'))
-            name_str = clean_val(row.get('name'))
-            if id_str: mapa_instancias[id_str] = name_str
-            if name_str: mapa_instancias[name_str] = name_str
+        if 'df_instancias' in st.session_state and not st.session_state['df_instancias'].empty:
+            if 'id' in st.session_state['df_instancias'].columns and 'name' in st.session_state['df_instancias'].columns:
+                for _, row in st.session_state['df_instancias'].iterrows():
+                    id_str = clean_val(row.get('id'))
+                    name_str = clean_val(row.get('name'))
+                    if id_str: mapa_instancias[id_str] = name_str
+                    if name_str: mapa_instancias[name_str] = name_str
 
-        df_areas_f = filtrar_por_data(st.session_state['df_areas_func'], data_pesquisa)
+        df_areas_f = filtrar_por_data(st.session_state.get('df_areas_func', pd.DataFrame()), data_pesquisa)
         hub_person_area = {}
-        for _, row in df_areas_f.iterrows():
-            p_str = clean_val(row.get('person'))
-            a_str = clean_val(row.get('area'))
-            hub_person_area[p_str] = mapa_instancias.get(a_str, a_str) 
+        if 'person' in df_areas_f.columns and 'area' in df_areas_f.columns:
+            for _, row in df_areas_f.iterrows():
+                p_str = clean_val(row.get('person'))
+                a_str = clean_val(row.get('area'))
+                hub_person_area[p_str] = mapa_instancias.get(a_str, a_str) 
 
         mapa_nomes_func_global = {}
-        for _, row in df_func.iterrows():
-            id_str = clean_val(row.get('id'))
-            mapa_nomes_func_global[id_str] = row.get('Nome Completo', '')
+        id_col_f = df_func.get('id', pd.Series(dtype=str))
+        nome_col_f = df_func.get('Nome Completo', pd.Series(dtype=str))
+        for i, val in zip(id_col_f, nome_col_f):
+            id_str = clean_val(i)
+            mapa_nomes_func_global[id_str] = val
 
-        df_gestores_f = filtrar_por_data(st.session_state['df_gestores'], data_pesquisa)
+        df_gestores_f = filtrar_por_data(st.session_state.get('df_gestores', pd.DataFrame()), data_pesquisa)
         hub_person_manager = {}
-        for _, row in df_gestores_f.iterrows():
-            p_str = clean_val(row.get('person'))
-            m_str = clean_val(row.get('manager'))
-            hub_person_manager[p_str] = mapa_nomes_func_global.get(m_str, "Gestor Desconhecido")
+        if 'person' in df_gestores_f.columns and 'manager' in df_gestores_f.columns:
+            for _, row in df_gestores_f.iterrows():
+                p_str = clean_val(row.get('person'))
+                m_str = clean_val(row.get('manager'))
+                hub_person_manager[p_str] = mapa_nomes_func_global.get(m_str, "Gestor Desconhecido")
 
         encontrados_email = []
         encontrados_nome = []
@@ -1088,69 +1130,70 @@ with aba_clima:
         qtd_erros_perguntas = 0
         lista_problemas_perguntas = []
 
-        for _, row in df_choice.iterrows():
-            titulo = row.get('title', 'Pergunta Desconhecida')
-            choices_str = row.get('question_object.choices', '[]')
-            
-            try:
-                if isinstance(choices_str, str): choices = ast.literal_eval(choices_str)
-                else: choices = choices_str
-            except:
-                choices = []
-
-            if not isinstance(choices, list) or len(choices) == 0:
-                continue
+        if 'title' in df_choice.columns:
+            for _, row in df_choice.iterrows():
+                titulo = row.get('title', 'Pergunta Desconhecida')
+                choices_str = row.get('question_object.choices', '[]')
                 
-            issues = []
-            valores_vistos = {}
-            descricoes_vistas = {}
-            choices_parsed = []
+                try:
+                    if isinstance(choices_str, str): choices = ast.literal_eval(choices_str)
+                    else: choices = choices_str
+                except:
+                    choices = []
 
-            for c in choices:
-                val_str = str(c.get('value', ''))
-                desc = str(c.get('description', '')).strip()
-                
-                try: val_num = float(val_str)
-                except: val_num = None
-                
-                if val_num is not None:
-                    choices_parsed.append({'val': val_num, 'desc': desc})
-                    if val_num < 0:
-                        issues.append(f"Valor negativo encontrado: {val_num} na opção '{desc}'")
-
-                if val_str in valores_vistos and valores_vistos[val_str] != desc:
-                    issues.append(f"Valor {val_str} está sendo usado para descrições diferentes: '{desc}' e '{valores_vistos[val_str]}'")
-                elif val_str in valores_vistos and valores_vistos[val_str] == desc:
-                    issues.append(f"Alternativa duplicada exata: '{desc}' com valor {val_str}")
-
-                if desc in descricoes_vistas and descricoes_vistas[desc] != val_str:
-                    issues.append(f"A descrição '{desc}' possui valores numéricos diferentes associados a ela: {val_str} e {descricoes_vistas[desc]}")
-
-                valores_vistos[val_str] = desc
-                descricoes_vistas[desc] = val_str
-
-            if len(choices_parsed) > 1:
-                choices_parsed.sort(key=lambda x: x['val'])
-                primeira_opcao = choices_parsed[0]['desc']
-                ultima_opcao = choices_parsed[-1]['desc']
-                
-                score_primeira = score_sentimento(primeira_opcao)
-                score_ultima = score_sentimento(ultima_opcao)
-                
-                if score_primeira > score_ultima and (score_primeira > 0 or score_ultima < 0):
-                    issues.append(f"Possível Inversão de Escala! O menor valor ({choices_parsed[0]['val']}) é '{primeira_opcao}' e o maior valor ({choices_parsed[-1]['val']}) é '{ultima_opcao}'.")
-
-            if issues:
-                qtd_erros_perguntas += 1
-                for issue in issues:
-                    lista_problemas_perguntas.append({'Nome da Pergunta': titulo, 'Problema': issue})
+                if not isinstance(choices, list) or len(choices) == 0:
+                    continue
                     
-                with st.expander(f"❌ Problemas encontrados em: {titulo}", expanded=False):
-                    for issue in issues:
-                        st.markdown(f"- {issue}")
+                issues = []
+                valores_vistos = {}
+                descricoes_vistas = {}
+                choices_parsed = []
 
-        if qtd_erros_perguntas == 0 and len(df_choice) > 0:
-            st.success("✅ Nenhuma anomalia de valores, duplicatas ou inversão de escala foi encontrada nas perguntas analisadas!")
+                for c in choices:
+                    val_str = str(c.get('value', ''))
+                    desc = str(c.get('description', '')).strip()
+                    
+                    try: val_num = float(val_str)
+                    except: val_num = None
+                    
+                    if val_num is not None:
+                        choices_parsed.append({'val': val_num, 'desc': desc})
+                        if val_num < 0:
+                            issues.append(f"Valor negativo encontrado: {val_num} na opção '{desc}'")
+
+                    if val_str in valores_vistos and valores_vistos[val_str] != desc:
+                        issues.append(f"Valor {val_str} está sendo usado para descrições diferentes: '{desc}' e '{valores_vistos[val_str]}'")
+                    elif val_str in valores_vistos and valores_vistos[val_str] == desc:
+                        issues.append(f"Alternativa duplicada exata: '{desc}' com valor {val_str}")
+
+                    if desc in descricoes_vistas and descricoes_vistas[desc] != val_str:
+                        issues.append(f"A descrição '{desc}' possui valores numéricos diferentes associados a ela: {val_str} e {descricoes_vistas[desc]}")
+
+                    valores_vistos[val_str] = desc
+                    descricoes_vistas[desc] = val_str
+
+                if len(choices_parsed) > 1:
+                    choices_parsed.sort(key=lambda x: x['val'])
+                    primeira_opcao = choices_parsed[0]['desc']
+                    ultima_opcao = choices_parsed[-1]['desc']
+                    
+                    score_primeira = score_sentimento(primeira_opcao)
+                    score_ultima = score_sentimento(ultima_opcao)
+                    
+                    if score_primeira > score_ultima and (score_primeira > 0 or score_ultima < 0):
+                        issues.append(f"Possível Inversão de Escala! O menor valor ({choices_parsed[0]['val']}) é '{primeira_opcao}' e o maior valor ({choices_parsed[-1]['val']}) é '{ultima_opcao}'.")
+
+                if issues:
+                    qtd_erros_perguntas += 1
+                    for issue in issues:
+                        lista_problemas_perguntas.append({'Nome da Pergunta': titulo, 'Problema': issue})
+                        
+                    with st.expander(f"❌ Problemas encontrados em: {titulo}", expanded=False):
+                        for issue in issues:
+                            st.markdown(f"- {issue}")
+
+            if qtd_erros_perguntas == 0 and len(df_choice) > 0:
+                st.success("✅ Nenhuma anomalia de valores, duplicatas ou inversão de escala foi encontrada nas perguntas analisadas!")
 
         # ========================================================
         # 4. EXPORTAÇÃO DOS DADOS DA PESQUISA (EXCEL)
