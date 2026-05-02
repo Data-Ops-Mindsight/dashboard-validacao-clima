@@ -10,11 +10,8 @@ import ast
 from fpdf import FPDF
 
 # --- Importa as nossas próprias funções locais ---
-try:
-    from app_functions import *
-    API_INSTALADA = True
-except ImportError:
-    API_INSTALADA = False
+from app_functions import *
+API_INSTALADA = True
 
 # ==========================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -282,7 +279,7 @@ with aba_estrutura:
         df_reg_func_filtrado = filtrar_por_data(df_reg_func, data_pesquisa)
         df_gestores_filtrado = filtrar_por_data(df_gestores, data_pesquisa)
 
-        # -- CRIAÇÃO SEGURA DA COLUNA 'NOME COMPLETO' --
+        # ⬇️ CRIAÇÃO SEGURA DA COLUNA 'NOME COMPLETO' (Corrige o KeyError: first_name)
         if 'name' in df_funcionarios.columns:
             df_funcionarios['Nome Completo'] = df_funcionarios['name'].fillna('Desconhecido')
         else:
@@ -442,7 +439,6 @@ with aba_estrutura:
             df_func_sem_area = df_funcionarios[df_funcionarios['id'].isin(sem_area_ids)].copy()
             df_func_sem_area['Data de Início'] = df_func_sem_area.get('id', pd.Series()).map(mapa_datas_inicio)
             
-            # Garantir as colunas antes de exibir
             if 'email' not in df_func_sem_area.columns: df_func_sem_area['email'] = ''
             df_exibicao_area = df_func_sem_area[['Nome Completo', 'email', 'Data de Início']]
             
@@ -669,248 +665,6 @@ with aba_estrutura:
 
         col2.download_button(label="📄 Exportar Pendências para PDF (.pdf)", data=pdf_data, file_name=f"Pendencias_Estrutura_{data_pesquisa.strftime('%Y%m%d')}.pdf", mime="application/pdf", width='stretch')
 
-        # --- 4. EXPORTAÇÃO DINÂMICA (HTML) COM PLACEHOLDER VARIÁVEL ---
-        st.markdown("---")
-        st.subheader("🌐 4. Exportação do Organograma Interativo")
-
-        def render_html_page(rows_data, title, placeholder_text):
-            return f"""<!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <title>{title}</title>
-        <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
-        <script type="text/javascript">
-          google.charts.load('current', {{packages:["orgchart"]}});
-          google.charts.setOnLoadCallback(drawChart);
-          
-          var chart;
-          var data;
-          var searchMatches = [];
-          var currentMatchIndex = -1;
-          var lastSearchTerm = "";
-          
-          function drawChart() {{
-            data = new google.visualization.DataTable();
-            data.addColumn('string', 'Name');
-            data.addColumn('string', 'Manager');
-            data.addColumn('string', 'ToolTip');
-            data.addRows([{rows_data}]);
-            chart = new google.visualization.OrgChart(document.getElementById('chart_div'));
-            chart.draw(data, {{allowHtml:true, allowCollapse:true, size:'medium'}});
-            
-            collapseRoots();
-          }}
-          
-          function collapseRoots() {{
-              for (var i = 0; i < data.getNumberOfRows(); i++) {{
-                  var parentId = data.getValue(i, 1);
-                  if (!parentId || parentId === '') {{
-                      chart.collapse(i, true);
-                  }}
-              }}
-          }}
-
-          function expandPathTo(row) {{
-              var parentId = data.getValue(row, 1);
-              if (!parentId || parentId === '') return;
-              for (var i = 0; i < data.getNumberOfRows(); i++) {{
-                  if (data.getValue(i, 0) === parentId) {{
-                      expandPathTo(i);
-                      chart.collapse(i, false);
-                      break;
-                  }}
-              }}
-          }}
-
-          function searchChart() {{
-            var input = document.getElementById('searchInput').value.toLowerCase().trim();
-            
-            if (!input) {{ 
-                chart.setSelection([]); 
-                lastSearchTerm = "";
-                document.getElementById('searchInfo').innerText = "";
-                return; 
-            }}
-            
-            if (input !== lastSearchTerm) {{
-                lastSearchTerm = input;
-                searchMatches = [];
-                currentMatchIndex = 0;
-                
-                for (var i = 0; i < data.getNumberOfRows(); i++) {{
-                  var cellHtml = data.getFormattedValue(i, 0);
-                  var tempDiv = document.createElement('div');
-                  tempDiv.innerHTML = cellHtml;
-                  var text = tempDiv.textContent || tempDiv.innerText || "";
-                  
-                  if (text.toLowerCase().indexOf(input) > -1) {{
-                    searchMatches.push(i);
-                  }}
-                }}
-            }} else {{
-                if (searchMatches.length > 0) {{
-                    currentMatchIndex = (currentMatchIndex + 1) % searchMatches.length;
-                }}
-            }}
-            
-            if (searchMatches.length > 0) {{
-                var targetRow = searchMatches[currentMatchIndex];
-                
-                expandPathTo(targetRow);
-                chart.setSelection([{{'row': targetRow}}]);
-                
-                document.getElementById('searchInfo').innerText = "Resultado " + (currentMatchIndex + 1) + " de " + searchMatches.length;
-                
-                setTimeout(function() {{
-                    var selectedNodes = document.getElementsByClassName('google-visualization-orgchart-nodesel');
-                    if(selectedNodes.length > 0) {{
-                        selectedNodes[0].scrollIntoView({{behavior: "smooth", block: "center", inline: "center"}});
-                    }}
-                }}, 200);
-            }} else {{
-                document.getElementById('searchInfo').innerText = "0 resultados";
-                alert('Nenhum resultado encontrado para: ' + input);
-            }}
-          }}
-          
-          function resetChart() {{
-              document.getElementById('searchInput').value = "";
-              lastSearchTerm = "";
-              searchMatches = [];
-              document.getElementById('searchInfo').innerText = "";
-              chart.setSelection([]);
-              collapseRoots();
-              window.scrollTo({{top: 0, left: 0, behavior: 'smooth'}});
-          }}
-        </script>
-        <style>
-          body {{ background-color: #09030f; font-family: sans-serif; padding: 20px; margin: 0; color: #fff; }}
-          h2, p {{ text-align: center; color: #fff; }}
-          
-          .top-panel {{
-              display: flex; flex-direction: column; align-items: center; margin-bottom: 20px;
-              background-color: #120520; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(181,0,255,0.1);
-          }}
-          .search-controls {{ display: flex; gap: 10px; align-items: center; justify-content: center; }}
-          #searchInput {{ padding: 12px; width: 350px; border: 1px solid #b500ff; border-radius: 4px; font-size: 14px; background: #000; color: white; }}
-          .search-btn {{ padding: 12px 25px; background: linear-gradient(90deg, #6200ea 0%, #b500ff 100%); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; transition: background 0.3s; }}
-          .search-btn:hover {{ background-color: #1a4f58; }}
-          .reset-btn {{ padding: 12px 25px; background-color: transparent; color: #b500ff; border: 1px solid #b500ff; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; transition: background 0.3s; }}
-          .reset-btn:hover {{ background-color: rgba(181, 0, 255, 0.1); }}
-          #searchInfo {{ margin-top: 10px; font-size: 14px; font-weight: bold; color: #d884ff; height: 20px; }}
-          
-          .chart-container {{ width: 100%; overflow-x: auto; text-align: center; padding: 20px 0; box-sizing: border-box; }}
-          .google-visualization-orgchart-table {{ margin: 0 auto !important; border-collapse: separate !important; }}
-          
-          .google-visualization-orgchart-node {{
-             border: 2px solid #6200ea !important; border-radius: 6px !important; background-color: #1a0a2e !important;
-             box-shadow: 2px 2px 8px rgba(0,0,0,0.5); padding: 12px !important; min-width: 160px; transition: all 0.3s;
-          }}
-          
-          .google-visualization-orgchart-nodesel {{
-              border: 3px solid #b500ff !important; background-color: #3b1154 !important;
-              transform: scale(1.1); box-shadow: 0px 0px 20px rgba(181, 0, 255, 0.6) !important; z-index: 10;
-          }}
-          
-          .nome-node {{ font-weight: bold; color: #d884ff; font-size: 13px; margin-bottom: 6px; text-transform: uppercase; }}
-          .desc-node {{ color: #ccc; font-size: 11px; margin-bottom: 4px; }}
-          .email-node {{ color: #aaa; font-size: 10px; font-style: italic; }}
-        </style>
-      </head>
-      <body>
-        <h2>{title}</h2>
-        
-        <div class="top-panel">
-            <div class="search-controls">
-                <input type="text" id="searchInput" placeholder="{placeholder_text}" onkeyup="if(event.key === 'Enter') searchChart()">
-                <button class="search-btn" onclick="searchChart()">🔍 Buscar</button>
-                <button class="reset-btn" onclick="resetChart()">🔄 Resetar Organograma</button>
-            </div>
-            <div id="searchInfo"></div>
-        </div>
-        
-        <div class="chart-container">
-            <div id="chart_div"></div>
-        </div>
-        
-      </body>
-    </html>"""
-
-        def exportar_orgchart_areas():
-            rows = []
-            visited = set()
-            tem_multiplas_raizes = len(todas_raizes_areas) > 1
-            if tem_multiplas_raizes: rows.append(f"[{{v:'Raiz_Global', f:'<div class=\"nome-node\">🏢 TODAS AS ÁREAS</div>'}}, '', '']")
-            def traverse(node, parent):
-                if node in visited: return
-                visited.add(node)
-                nome = safe_html(mapa_nomes_areas.get(node, f"ID {node}"))
-                qtd = calcular_total_areas_seguro(node)
-                html_f = f"<div class=\"nome-node\">{nome}</div><div class=\"desc-node\">Total: {qtd} func.</div>"
-                parent_id = str(parent) if parent else ('Raiz_Global' if tem_multiplas_raizes else '')
-                rows.append(f"[{{v:'{node}', f:'{html_f}'}}, '{parent_id}', '']")
-                
-                children = list(G_areas.successors(node))
-                children.sort(key=lambda x: calcular_total_areas_seguro(x), reverse=True)
-                for child in children:
-                    if child not in visited: traverse(child, node)
-            for raiz in todas_raizes_areas: traverse(raiz, None)
-            return ",\n".join(rows)
-
-        def exportar_orgchart_gestores():
-            rows = []
-            visited = set()
-            tem_multiplas_raizes = len(todas_raizes_gestores) > 1
-            if tem_multiplas_raizes: rows.append(f"[{{v:'Raiz_Global', f:'<div class=\"nome-node\">DIRETORIA GERAL</div>'}}, '', '']")
-            def traverse(node, parent):
-                if node in visited: return
-                visited.add(node)
-                nome = safe_html(mapa_nomes_func.get(node, f"ID {node}"))
-                qtd = calcular_total_gestores_seguro(node)
-                email = ""
-                df_f = df_funcionarios[df_funcionarios.get('id') == node]
-                if not df_f.empty and 'email' in df_f.columns:
-                    val = df_f['email'].values[0]
-                    if pd.notna(val): email = safe_html(val)
-                html_f = f"<div class=\"nome-node\">{nome}</div><div class=\"desc-node\">{qtd} liderados</div><div class=\"email-node\">{email}</div>"
-                parent_id = str(parent) if parent else ('Raiz_Global' if tem_multiplas_raizes else '')
-                rows.append(f"[{{v:'{node}', f:'{html_f}'}}, '{parent_id}', '']")
-                
-                children = list(G_gestores.successors(node))
-                children.sort(key=lambda x: calcular_total_gestores_seguro(x), reverse=True)
-                for child in children:
-                    if child not in visited: traverse(child, node)
-            for raiz in todas_raizes_gestores: traverse(raiz, None)
-            return ",\n".join(rows)
-
-        col3, col4 = st.columns(2)
-        
-        html_areas = render_html_page(
-            exportar_orgchart_areas(), 
-            f"Organograma de Áreas - {data_pesquisa.strftime('%d/%m/%Y')}", 
-            placeholder_text="Busque por uma área (Ex: Emergencial)..."
-        )
-        html_gestores = render_html_page(
-            exportar_orgchart_gestores(), 
-            f"Organograma de Gestores - {data_pesquisa.strftime('%d/%m/%Y')}", 
-            placeholder_text="Busque por um gestor..."
-        )
-        
-        col3.download_button(
-            label="🌍 Baixar Arquivo Dinâmico de Áreas (.html)",
-            data=html_areas,
-            file_name=f"OrgChart_Areas_{data_pesquisa.strftime('%Y%m%d')}.html",
-            mime="text/html",
-            width='stretch'
-        )
-        col4.download_button(
-            label="🌍 Baixar Arquivo Dinâmico de Gestores (.html)",
-            data=html_gestores,
-            file_name=f"OrgChart_Gestores_{data_pesquisa.strftime('%Y%m%d')}.html",
-            mime="text/html",
-            width='stretch'
-        )
 
 # ==========================================
 # ABA 2: PESQUISA DE CLIMA
