@@ -34,21 +34,13 @@ if 'is_fetching' not in st.session_state:
     st.session_state['is_fetching'] = False
 
 # ==========================================
-# INJEÇÃO DE CSS PREMIUM (PALETA MINDSIGHT)
+# INJEÇÃO DE CSS PREMIUM (DEGRADÊS E AJUSTES)
 # ==========================================
 st.markdown("""
     <style>
-    /* Fundo Escuro Minimalista e Remoção do Topo (Deploy) */
-    .stApp {
-        background-color: #09030f;
-        color: #ffffff;
-    }
+    /* Remoção do Topo (Deploy) */
     header[data-testid="stHeader"] {
         background-color: transparent !important;
-    }
-    /* Menu Lateral Escuro com nuance roxa */
-    [data-testid="stSidebar"] {
-        background-color: #120520 !important;
     }
     /* Estilização dos Botões com Gradiente Roxo */
     div.stButton > button:first-child {
@@ -81,20 +73,16 @@ st.markdown("""
     .btn-reset > div > button:hover {
         background: rgba(181, 0, 255, 0.1) !important;
     }
-    /* Números dos KPIs */
+    /* Números dos KPIs e Quebra de Linha para Títulos Longos */
     div[data-testid="stMetricValue"] {
         color: #d884ff;
     }
-    /* Tabs (Abas) */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 20px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        color: #b0b0b0;
-    }
-    .stTabs [aria-selected="true"] {
-        color: #b500ff !important;
-        border-bottom-color: #b500ff !important;
+    div[data-testid="stMetricValue"] > div {
+        white-space: normal !important;
+        word-wrap: break-word !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        line-height: 1.2;
     }
     </style>
 """, unsafe_allow_html=True)
