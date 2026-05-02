@@ -224,3 +224,36 @@ def get_pesquisa_contact_api(tenant: str, token: str, campaign_id: int, page_siz
     if df_contact_api.empty:
         return pd.DataFrame(columns=standard_columns)
     return df_contact_api
+
+def get_pesquisa_survey_api(
+    tenant: str,
+    token: str,
+    page_size: Optional[int] = None,
+    max_workers: Optional[int] = None,
+    parallel: bool = True,
+    ignore_page_size_limits: bool = False
+) -> pd.DataFrame:
+    """
+    Obtém informações das pesquisas via API e explode as perguntas para formato plano.
+    """
+    standard_columns = ['id', 'title', 'description', 'questions.title', 'questions.type']
+    
+    # Busca os dados do endpoint survey_admin
+    df_survey_api = get_dataframe_from_api('pesquisa', tenant, 'survey_admin', token, page_size)
+    
+    if df_survey_api.empty:
+        return pd.DataFrame(columns=standard_columns)
+    
+    # Processamento para extrair as perguntas aninhadas
+    # Explodimos a coluna 'questions' que contém a lista de dicts
+    df_survey_api = df_survey_api.explode('questions')
+    
+    # Resetamos o index para evitar problemas no normalize
+    df_survey_api = df_survey_api.reset_index(drop=True)
+    
+    # Normalizamos o campo questions (que agora é um dict por linha)
+    # Usamos o método to_json/loads para garantir que o normalize trate corretamente o objeto
+    json_survey_api = df_survey_api.to_json(orient='records')
+    df_survey_api = pd.json_normalize(json.loads(json_survey_api))
+    
+    return df_survey_api
