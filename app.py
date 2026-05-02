@@ -681,49 +681,78 @@ with aba_estrutura:
 with aba_clima:
     st.header("🌤️ Validação da Estrutura da Pesquisa de Clima")
     
+    if not API_INSTALADA:
+        st.error("🚨 O arquivo de funções (`app_functions.py`) não foi encontrado!")
+        st.stop()
+
+    st.markdown("### 📥 Importação de Bases da Pesquisa")
+    
     if st.button("🚀 Puxar Dados da Pesquisa de Clima", width='stretch'):
         if not tenant or not token_pesquisas or not id_campanha:
-            st.warning("⚠️ Preencha o Tenant, Token e ID da Campanha na lateral.")
+            st.warning("⚠️ Por favor, preencha o **Tenant**, o **Token do Pesquisas** e o **ID da Campanha** na barra lateral.")
+        elif not id_campanha.strip().isdigit():
+            st.error("🚨 O **ID da Campanha** deve ser um número inteiro (ex: 123).")
         elif not st.session_state.get('dados_carregados'):
-            st.error("🚨 Você precisa primeiro 'Puxar Dados da Estrutura' na aba anterior!")
+            st.error("🚨 **Atenção:** Você precisa primeiro **Puxar Dados da Estrutura** na aba anterior, pois usaremos os funcionários do Hub para cruzar com a pesquisa!")
         else:
             st.session_state['is_fetching'] = True
-            progresso = st.progress(0)
+            progresso_clima = st.progress(0)
+            hist_clima = st.empty()
+            logs_clima = ""
+
             try:
+                id_camp_int = int(id_campanha.strip())
+
                 # 1. Baixa Campanhas
-                with st.spinner("⏳ Localizando Campanha..."):
+                with st.spinner("⏳ Baixando **Campanhas**..."):
                     df_camp = get_pesquisa_campaigns_api(tenant, token_pesquisas)
                     st.session_state['df_pesquisa_camp'] = df_camp
-                progresso.progress(25)
+                progresso_clima.progress(25)
+                logs_clima += "✅ Campanhas baixadas com sucesso!<br>"
+                hist_clima.markdown(logs_clima, unsafe_allow_html=True)
 
-                # 2. Identifica a Survey vinculada
+                # 2. Identifica a Survey vinculada para poder baixar
                 id_survey = None
                 if not df_camp.empty and 'id' in df_camp.columns:
-                    camp_row = df_camp[df_camp['id'].astype(str) == str(id_campanha)]
+                    camp_row = df_camp[df_camp['id'].astype(str) == str(id_camp_int)]
                     if not camp_row.empty:
-                        # Tenta pegar survey.id ou survey (depende de como o normalize agiu antes)
                         id_survey = camp_row.get('survey.id', camp_row.get('survey', [None])).values[0]
 
-                # 3. Baixa apenas a Survey necessária (Isso resolve o seu erro!)
-                with st.spinner(f"⏳ Baixando estrutura da Survey {id_survey}..."):
-                    st.session_state['df_pesquisa_survey'] = get_pesquisa_survey_api(tenant, token_pesquisas, survey_id=id_survey)
-                progresso.progress(50)
+                # 3. Baixa apenas a Survey específica
+                with st.spinner("⏳ Baixando **Estrutura da Pesquisa (Survey)**..."):
+                    if pd.notna(id_survey):
+                        st.session_state['df_pesquisa_survey'] = get_pesquisa_survey_api(tenant, token_pesquisas, survey_id=int(id_survey))
+                    else:
+                        st.session_state['df_pesquisa_survey'] = pd.DataFrame()
+                progresso_clima.progress(50)
+                logs_clima += "✅ Estrutura da pesquisa mapeada com sucesso!<br>"
+                hist_clima.markdown(logs_clima, unsafe_allow_html=True)
 
-                # 4. Baixa Contatos e Banco de Perguntas
-                with st.spinner("⏳ Baixando Contatos e Alternativas..."):
+                # 4. Baixa as Perguntas
+                with st.spinner("⏳ Baixando **Perguntas (Choices)**..."):
                     st.session_state['df_pesquisa_choice'] = get_pesquisa_choice_question_api(tenant, token_pesquisas)
-                    st.session_state['df_pesquisa_contatos'] = get_pesquisa_contact_api(tenant, token_pesquisas, int(id_campanha))
-                progresso.progress(100)
+                progresso_clima.progress(75)
+                logs_clima += "✅ Perguntas do banco baixadas com sucesso!<br>"
+                hist_clima.markdown(logs_clima, unsafe_allow_html=True)
+
+                # 5. Baixa os Contatos
+                with st.spinner("⏳ Baixando **Contatos da Campanha**..."):
+                    st.session_state['df_pesquisa_contatos'] = get_pesquisa_contact_api(tenant, token_pesquisas, id_camp_int)
+                progresso_clima.progress(100)
+                logs_clima += "✅ Contatos baixados com sucesso!<br>"
+                hist_clima.markdown(logs_clima, unsafe_allow_html=True)
 
                 st.session_state['dados_clima_carregados'] = True
                 st.session_state['is_fetching'] = False
-                st.toast("🎉 Pesquisa carregada com sucesso!")
+                st.toast("🎉 Dados da pesquisa importados com sucesso!", icon='🎉')
+                time.sleep(1)
                 st.rerun()
+
             except Exception as e:
                 st.session_state['is_fetching'] = False
-                st.error(f"❌ Erro ao carregar clima: {e}")
+                st.error(f"❌ Ocorreu um erro ao comunicar com a API: {e}")
+                progresso_clima.empty()
 
-    # --- RENDERIZAÇÃO DOS RESULTADOS ---
     if st.session_state.get('dados_clima_carregados'):
         df_camp = st.session_state.get('df_pesquisa_camp', pd.DataFrame())
         df_choice_total = st.session_state.get('df_pesquisa_choice', pd.DataFrame())
@@ -731,28 +760,27 @@ with aba_clima:
         df_contatos = st.session_state.get('df_pesquisa_contatos', pd.DataFrame())
         df_func = st.session_state.get('df_funcionarios', pd.DataFrame())
 
-        # Lógica de Filtro de Perguntas
-        nome_pesquisa = "Pesquisa não encontrada"
+        nome_pesquisa = "Nome Indisponível"
         df_choice = pd.DataFrame()
 
-        if not df_camp.empty:
-            camp_atual = df_camp[df_camp['id'].astype(str) == str(id_campanha)]
-            if not camp_atual.empty:
-                nome_pesquisa = camp_atual['name'].values[0]
-                
-                # Pega os títulos das perguntas que estão na Survey
-                if not df_survey_full.empty and 'questions.title' in df_survey_full.columns:
-                    lista_titulos = df_survey_full['questions.title'].dropna().unique().tolist()
-                    # Filtra o banco de perguntas para ter apenas as que batem com os títulos da survey
-                    df_choice = df_choice_total[df_choice_total['title'].isin(lista_titulos)].copy()
-                                else:
-                                    st.warning("A base de perguntas (choices) puxada da API está vazia ou mal formatada.")
-                            else:
-                                st.warning("Não foram encontradas perguntas associadas à estrutura desta Survey (questions.title não existe).")
+        # --- LÓGICA DE FILTRO SEGURA DA SURVEY ---
+        try:
+            if not df_camp.empty and 'id' in df_camp.columns:
+                pesquisa_atual = df_camp[df_camp['id'].astype(str) == str(id_campanha).strip()]
+                if not pesquisa_atual.empty:
+                    if 'name' in pesquisa_atual.columns:
+                        nome_pesquisa = pesquisa_atual['name'].values[0]
+                    
+                    if not df_survey_full.empty and 'questions.title' in df_survey_full.columns:
+                        lista_titulos_validos = df_survey_full['questions.title'].dropna().unique().tolist()
+                        
+                        if not df_choice_total.empty and 'title' in df_choice_total.columns:
+                            # Filtra as choices para validar apenas as perguntas que estão na Survey
+                            df_choice = df_choice_total[df_choice_total['title'].isin(lista_titulos_validos)].copy()
                         else:
-                            st.warning(f"A Survey vinculada (ID: {id_survey_vinculada}) não foi encontrada no endpoint de surveys ou a tabela está vazia.")
+                            st.warning("A base de perguntas (choices) puxada da API está vazia ou mal formatada.")
                     else:
-                        st.warning("A campanha atual não possui a coluna 'survey.id', não foi possível mapear as perguntas exatas.")
+                        st.warning("Não foram encontradas perguntas associadas à estrutura desta Survey (ou a tabela está vazia).")
                 else:
                     st.error(f"Nenhuma campanha encontrada com o ID {id_campanha}.")
             else:
