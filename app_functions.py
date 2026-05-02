@@ -1,5 +1,6 @@
 import pandas as pd
 import requests
+import io
 from typing import Optional
 
 # ==========================================
@@ -30,13 +31,12 @@ def get_dataframe_from_api(
     **kwargs
 ) -> pd.DataFrame:
     """
-    Faz a requisição para a API da Mindsight, lida automaticamente com a paginação
-    e "achata" os dados JSON aninhados em formato de tabela (DataFrame).
+    Faz a requisição para a API da Mindsight. Se retornar erro, lança uma exceção
+    para que o app principal (app.py) trave e exiba o erro na tela.
     """
+    # Remove barras duplicadas caso a rota venha com barra no final
+    endpoint = endpoint.strip('/')
     base_url = f"https://{system}.mindsight.com.br/{tenant}/api/v1/{endpoint}/"
-    
-    if not base_url.endswith('/') and '?' not in base_url:
-        base_url += '/'
 
     headers = {
         "Authorization": f"Token {token}",
@@ -50,35 +50,42 @@ def get_dataframe_from_api(
     all_data = []
     url = base_url
     
-    try:
-        while url:
-            response = requests.get(url, headers=headers, params=params if url == base_url else None)
-            
-            if response.status_code != 200:
-                import streamlit as st
-                st.error(f"🚨 Falha na API (`{system}/{endpoint}`): HTTP {response.status_code}\n\nURL: {url}\nResposta: {response.text}")
-                return pd.DataFrame()
-                
-            data = response.json()
-            
-            if isinstance(data, dict) and 'results' in data:
-                all_data.extend(data['results'])
-                url = data.get('next') 
-            elif isinstance(data, list):
-                all_data.extend(data)
-                url = None
-            else:
-                all_data.append(data)
-                url = None
-                
-    except Exception as e:
-        import streamlit as st
-        st.error(f"🚨 Erro interno de conexão (`{system}`): {e}")
-        return pd.DataFrame()
+    while url:
+        response = requests.get(url, headers=headers, params=params if url == base_url else None)
         
-    # ⬇️ A CORREÇÃO MÁGICA: json_normalize() converte dicts aninhados em colunas planas! ⬇️
+        # Se a API recusar a conexão, LANÇA O ERRO direto pro app.py (sem atualizar a tela!)
+        if response.status_code != 200:
+            raise Exception(f"Erro HTTP {response.status_code} ({response.reason}) na URL:\n{url}\n\nResposta da API: {response.text[:300]}")
+            
+        # Tentativa 1: Formato JSON Padrão
+        try:
+            data = response.json()
+        except Exception:
+            # Tentativa 2: Formato de Arquivo (CSV ou Excel) comum em rotas de 'export'
+            content_type = response.headers.get('Content-Type', '').lower()
+            try:
+                if 'excel' in content_type or 'spreadsheet' in content_type:
+                    return pd.read_excel(io.BytesIO(response.content))
+                else:
+                    # Se falhar o JSON, tenta ler como CSV nativo usando delimitador automático
+                    return pd.read_csv(io.StringIO(response.text), sep=None, engine='python')
+            except Exception as e:
+                raise Exception(f"A API retornou sucesso, mas o formato é desconhecido e não pôde ser lido. Tipo: {content_type}. Erro: {e}")
+        
+        # Processamento de páginas JSON
+        if isinstance(data, dict) and 'results' in data:
+            all_data.extend(data['results'])
+            url = data.get('next') 
+        elif isinstance(data, list):
+            all_data.extend(data)
+            url = None
+        else:
+            all_data.append(data)
+            url = None
+                
     if not all_data:
         return pd.DataFrame()
+        
     return pd.json_normalize(all_data)
 
 
