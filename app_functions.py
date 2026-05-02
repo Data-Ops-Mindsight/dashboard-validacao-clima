@@ -16,7 +16,7 @@ def getLastName(name: str):
 
 def get_ID_from_url(url):
     if pd.isna(url) or not isinstance(url, str): return url
-    parts = [p for p in url.split('/') if p]
+    parts = [p for p in str(url).split('/') if p]
     if parts and parts[-1].isdigit():
         return int(parts[-1])
     return url
@@ -30,18 +30,11 @@ def get_dataframe_from_api(
     **kwargs
 ) -> pd.DataFrame:
     """
-    Motor central que substitui a biblioteca mindsight_api_requests.
-    Faz a requisição para a API e lida automaticamente com a paginação.
+    Faz a requisição para a API da Mindsight e lida automaticamente com a paginação.
     """
-    # Define as URLs base (Ajuste o '/api/' ou '/api/v1/' se a arquitetura do seu Django for diferente)
-    if system == 'hub':
-        base_url = f"https://hub.mindsight.com.br/{tenant}/api/{endpoint}"
-    elif system == 'pesquisa':
-        base_url = f"https://pesquisa.mindsight.com.br/{tenant}/api/{endpoint}"
-    else:
-        return pd.DataFrame()
-        
-    # Garante que termine com barra (padrão do Django Rest Framework)
+    # ⬇️ AQUI ESTÁ A CORREÇÃO DA URL (/api/v1/) ⬇️
+    base_url = f"https://{system}.mindsight.com.br/{tenant}/api/v1/{endpoint}/"
+    
     if not base_url.endswith('/') and '?' not in base_url:
         base_url += '/'
 
@@ -59,12 +52,15 @@ def get_dataframe_from_api(
     
     try:
         while url:
-            # params só são passados na primeira requisição; as próximas (via 'next') já vêm com eles na URL
             response = requests.get(url, headers=headers, params=params if url == base_url else None)
-            response.raise_for_status()
+            
+            if response.status_code != 200:
+                import streamlit as st
+                st.error(f"🚨 Falha na API (`{system}/{endpoint}`): HTTP {response.status_code}\n\nURL: {url}\nResposta: {response.text}")
+                return pd.DataFrame()
+                
             data = response.json()
             
-            # Tratamento de paginação padrão do Django
             if isinstance(data, dict) and 'results' in data:
                 all_data.extend(data['results'])
                 url = data.get('next') 
@@ -76,7 +72,9 @@ def get_dataframe_from_api(
                 url = None
                 
     except Exception as e:
-        print(f"Erro na API ({url}): {e}")
+        import streamlit as st
+        st.error(f"🚨 Erro interno de conexão (`{system}`): {e}")
+        return pd.DataFrame()
         
     return pd.DataFrame(all_data)
 
@@ -90,18 +88,19 @@ def get_hub_employees_api(tenant: str, token: str, page_size: Optional[int] = No
     df_employees_api = get_dataframe_from_api('hub', tenant, 'people/get_all_employees', token, page_size)
     
     if df_employees_api.empty:
-        df_employees_api = pd.DataFrame(columns=standard_columns)
-    else:
-        if 'cpf' not in df_employees_api.columns:
-            df_employees_api['cpf'] = None
+        return pd.DataFrame(columns=standard_columns)
+        
+    if 'cpf' not in df_employees_api.columns:
+        df_employees_api['cpf'] = None
+    if 'name' in df_employees_api.columns:
         df_employees_api['first_name'] = df_employees_api['name'].apply(getFirstName)
         df_employees_api['last_name'] = df_employees_api['name'].apply(getLastName)
-        if 'user' in df_employees_api.columns:
-            df_employees_api['user'] = df_employees_api['user'].apply(get_ID_from_url)
+    if 'user' in df_employees_api.columns:
+        df_employees_api['user'] = df_employees_api['user'].apply(get_ID_from_url)
+        
     return df_employees_api
 
 def get_hub_contract_types_api(tenant: str, token: str, page_size: Optional[int] = None, **kwargs) -> pd.DataFrame:
-    """Função auxiliar necessária para mapear os tipos de contrato nas companies."""
     df = get_dataframe_from_api('hub', tenant, 'contract_types', token, page_size)
     if df.empty: return pd.DataFrame(columns=['id', 'description', 'key'])
     return df
@@ -112,18 +111,19 @@ def get_hub_companies_api(tenant: str, token: str, page_size: Optional[int] = No
     df_companies_api = get_dataframe_from_api('hub', tenant, 'companies', token, page_size)
     
     if df_companies_api.empty:
-        df_companies_api = pd.DataFrame(columns=standard_columns)
-    else:
-        if 'api_url' in df_companies_api.columns:
-            df_companies_api['id'] = df_companies_api['api_url'].apply(get_ID_from_url)
-        if 'person' in df_companies_api.columns:
-            df_companies_api['person'] = df_companies_api['person'].apply(get_ID_from_url)
+        return pd.DataFrame(columns=standard_columns)
+        
+    if 'api_url' in df_companies_api.columns:
+        df_companies_api['id'] = df_companies_api['api_url'].apply(get_ID_from_url)
+    if 'person' in df_companies_api.columns:
+        df_companies_api['person'] = df_companies_api['person'].apply(get_ID_from_url)
+        
+    df_hub_contract_types_api = get_hub_contract_types_api(tenant, token, page_size)
+    if not df_hub_contract_types_api.empty and 'description' in df_hub_contract_types_api.columns:
+        mapping = dict(zip(df_hub_contract_types_api['description'], df_hub_contract_types_api['key']))
+        if 'contract' in df_companies_api.columns:
+            df_companies_api['contract_type'] = df_companies_api['contract'].map(mapping)
             
-        df_hub_contract_types_api = get_hub_contract_types_api(tenant, token, page_size)
-        if not df_hub_contract_types_api.empty and 'description' in df_hub_contract_types_api.columns:
-            mapping = dict(zip(df_hub_contract_types_api['description'], df_hub_contract_types_api['key']))
-            if 'contract' in df_companies_api.columns:
-                df_companies_api['contract_type'] = df_companies_api['contract'].map(mapping)
     return df_companies_api
 
 def get_hub_managers_api(tenant: str, token: str, page_size: Optional[int] = None, max_workers: Optional[int] = None, parallel: bool = True, ignore_page_size_limits: bool = False) -> pd.DataFrame:
@@ -131,14 +131,15 @@ def get_hub_managers_api(tenant: str, token: str, page_size: Optional[int] = Non
     df_managers_api = get_dataframe_from_api('hub', tenant, 'managers', token, page_size)
     
     if df_managers_api.empty:
-        df_managers_api = pd.DataFrame(columns=standard_columns)
-    else:
-        if 'api_url' in df_managers_api.columns:
-            df_managers_api['id'] = df_managers_api['api_url'].apply(get_ID_from_url)
-        if 'person' in df_managers_api.columns:
-            df_managers_api['person'] = df_managers_api['person'].apply(get_ID_from_url)
-        if 'manager.id' in df_managers_api.columns:
-            df_managers_api['manager'] = df_managers_api['manager.id']
+        return pd.DataFrame(columns=standard_columns)
+        
+    if 'api_url' in df_managers_api.columns:
+        df_managers_api['id'] = df_managers_api['api_url'].apply(get_ID_from_url)
+    if 'person' in df_managers_api.columns:
+        df_managers_api['person'] = df_managers_api['person'].apply(get_ID_from_url)
+    if 'manager.id' in df_managers_api.columns:
+        df_managers_api['manager'] = df_managers_api['manager.id']
+        
     return df_managers_api
 
 def get_hub_area_instances_api(tenant: str, token: str, page_size: Optional[int] = None, max_workers: Optional[int] = None, parallel: bool = True, ignore_page_size_limits: bool = False) -> pd.DataFrame:
@@ -146,10 +147,11 @@ def get_hub_area_instances_api(tenant: str, token: str, page_size: Optional[int]
     df_area_instances_api = get_dataframe_from_api('hub', tenant, 'area_instances', token, page_size)
     
     if df_area_instances_api.empty:
-        df_area_instances_api = pd.DataFrame(columns=standard_columns)
-    else:
-        if 'code' in df_area_instances_api.columns:
-            df_area_instances_api['code'] = df_area_instances_api['code'].astype(str)
+        return pd.DataFrame(columns=standard_columns)
+        
+    if 'code' in df_area_instances_api.columns:
+        df_area_instances_api['code'] = df_area_instances_api['code'].astype(str)
+        
     return df_area_instances_api
 
 def get_hub_area_hierarchy_api(tenant: str, token: str, page_size: Optional[int] = None, max_workers: Optional[int] = None, parallel: bool = True, ignore_page_size_limits: bool = False) -> pd.DataFrame:
@@ -157,16 +159,19 @@ def get_hub_area_hierarchy_api(tenant: str, token: str, page_size: Optional[int]
     df_area_hierarchy_api = get_dataframe_from_api('hub', tenant, 'area_hierarchy', token, page_size)
     
     if df_area_hierarchy_api.empty:
-        df_area_hierarchy_api = pd.DataFrame(columns=standard_columns)
-    else:
-        df_area_hierarchy_api['id'] = df_area_hierarchy_api['api_url'].apply(get_ID_from_url) if 'api_url' in df_area_hierarchy_api.columns else df_area_hierarchy_api.get('id')
-        df_area_hierarchy_api['area'] = df_area_hierarchy_api['area'].apply(get_ID_from_url) if 'area' in df_area_hierarchy_api.columns else None
-        df_area_hierarchy_api['parent'] = df_area_hierarchy_api['parent'].apply(get_ID_from_url) if 'parent' in df_area_hierarchy_api.columns else None
+        return pd.DataFrame(columns=standard_columns)
         
-        df_hub_area_instances_api = get_hub_area_instances_api(tenant, token, page_size)
-        if not df_hub_area_instances_api.empty:
+    df_area_hierarchy_api['id'] = df_area_hierarchy_api['api_url'].apply(get_ID_from_url) if 'api_url' in df_area_hierarchy_api.columns else df_area_hierarchy_api.get('id')
+    df_area_hierarchy_api['area'] = df_area_hierarchy_api['area'].apply(get_ID_from_url) if 'area' in df_area_hierarchy_api.columns else None
+    df_area_hierarchy_api['parent'] = df_area_hierarchy_api['parent'].apply(get_ID_from_url) if 'parent' in df_area_hierarchy_api.columns else None
+    
+    df_hub_area_instances_api = get_hub_area_instances_api(tenant, token, page_size)
+    if not df_hub_area_instances_api.empty:
+        if 'area' in df_area_hierarchy_api.columns and 'id' in df_hub_area_instances_api.columns:
             df_area_hierarchy_api = df_area_hierarchy_api.merge(df_hub_area_instances_api[['name', 'id', 'code']], how='left', left_on='area', right_on='id', suffixes=('', '_area'))
+        if 'parent' in df_area_hierarchy_api.columns and 'id' in df_hub_area_instances_api.columns:
             df_area_hierarchy_api = df_area_hierarchy_api.merge(df_hub_area_instances_api[['name', 'id', 'code']], how='left', left_on='parent', right_on='id', suffixes=('', '_parent'))
+            
     return df_area_hierarchy_api
 
 def get_hub_areas_api(tenant: str, token: str, page_size: Optional[int] = None, max_workers: Optional[int] = None, parallel: bool = True, ignore_page_size_limits: bool = False) -> pd.DataFrame:
@@ -174,16 +179,17 @@ def get_hub_areas_api(tenant: str, token: str, page_size: Optional[int] = None, 
     df_areas_api = get_dataframe_from_api('hub', tenant, 'areas', token, page_size)
     
     if df_areas_api.empty:
-        df_areas_api = pd.DataFrame(columns=standard_columns)
-    else:
-        df_areas_api['id'] = df_areas_api['api_url'].apply(get_ID_from_url) if 'api_url' in df_areas_api.columns else df_areas_api.get('id')
-        df_areas_api['person'] = df_areas_api['person'].apply(get_ID_from_url) if 'person' in df_areas_api.columns else None
+        return pd.DataFrame(columns=standard_columns)
         
-        df_hub_area_instances_api = get_hub_area_instances_api(tenant, token)
-        if not df_hub_area_instances_api.empty:
+    df_areas_api['id'] = df_areas_api['api_url'].apply(get_ID_from_url) if 'api_url' in df_areas_api.columns else df_areas_api.get('id')
+    df_areas_api['person'] = df_areas_api['person'].apply(get_ID_from_url) if 'person' in df_areas_api.columns else None
+    
+    df_hub_area_instances_api = get_hub_area_instances_api(tenant, token)
+    if not df_hub_area_instances_api.empty:
+        if 'area' in df_areas_api.columns and 'name' in df_hub_area_instances_api.columns:
             df_areas_api = df_areas_api.merge(df_hub_area_instances_api[['name', 'id', 'code']], how='left', left_on='area', right_on='name', suffixes=('', '_area'))
+            
     return df_areas_api
-
 
 # ==========================================
 # 🌤️ FUNÇÕES DE PESQUISA DE CLIMA
@@ -192,19 +198,19 @@ def get_pesquisa_campaigns_api(tenant: str, token: str, page_size: Optional[int]
     standard_columns = ['id', 'name', 'description', 'start_date', 'end_date', 'status', 'template', 'survey.id', 'survey.title']
     df_campaigns_api = get_dataframe_from_api('pesquisa', tenant, 'campaigns', token, page_size)
     if df_campaigns_api.empty:
-        df_campaigns_api = pd.DataFrame(columns=standard_columns)
+        return pd.DataFrame(columns=standard_columns)
     return df_campaigns_api
 
 def get_pesquisa_choice_question_api(tenant: str, token: str, page_size: Optional[int] = None, max_workers: Optional[int] = None, parallel: bool = True, ignore_page_size_limits: bool = False) -> pd.DataFrame:
     standard_columns = ['id', 'title', 'description', 'image', 'type', 'category', 'created_date', 'modified_date', 'question_object.choices']
     df_choice_question_api = get_dataframe_from_api('pesquisa', tenant, 'choice_question_admin', token, page_size)
     if df_choice_question_api.empty:
-        df_choice_question_api = pd.DataFrame(columns=standard_columns)
+        return pd.DataFrame(columns=standard_columns)
     return df_choice_question_api
 
 def get_pesquisa_contact_api(tenant: str, token: str, campaign_id: int, page_size: Optional[int] = None, max_workers: Optional[int] = None, parallel: bool = True, ignore_page_size_limits: bool = False) -> pd.DataFrame:
     standard_columns = ['id', 'first name', 'last name', 'email', 'phone', 'campaign', 'survey_status', 'notification status', 'language', 'first_access', 'created_date', 'modified_date', 'key', 'survey link']
-    df_contact_api = get_dataframe_from_api('pesquisa', tenant, f'campaigns/{campaign_id}/export_campaign_contacts/', token, page_size)
+    df_contact_api = get_dataframe_from_api('pesquisa', tenant, f'campaigns/{campaign_id}/export_campaign_contacts', token, page_size)
     if df_contact_api.empty:
-        df_contact_api = pd.DataFrame(columns=standard_columns)
+        return pd.DataFrame(columns=standard_columns)
     return df_contact_api
