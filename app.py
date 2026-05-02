@@ -19,13 +19,13 @@ try:
     import mindsight_api_requests
     API_INSTALADA = True
 except ImportError:
-    # Se a biblioteca não estiver instalada, pega o token dos secrets e instala na hora!
     try:
         with st.spinner("Configurando ambiente seguro pela primeira vez..."):
             token = st.secrets["GITHUB_TOKEN"]
-            url = f"git+https://{token}@github.com/Data-Ops-Mindsight/mindsight-api-requests.git"
+            # ⬇️ A MUDANÇA ESTÁ AQUI NA URL (x-access-token) ⬇️
+            url = f"git+https://x-access-token:{token}@github.com/Data-Ops-Mindsight/mindsight-api-requests.git"
             subprocess.check_call([sys.executable, "-m", "pip", "install", url])
-            st.rerun() # Reinicia a página para reconhecer a nova biblioteca
+            st.rerun() 
     except Exception as e:
         API_INSTALADA = False
 
@@ -153,12 +153,12 @@ def mostrar_tutorial_tokens():
 # ==========================================
 # BARRA LATERAL: LOGO E CREDENCIAIS
 # ==========================================
-st.sidebar.image("preview_mind.png", use_container_width=True)
+st.sidebar.image("preview_mind.png", width='stretch')
 
 st.sidebar.header("🔑 Credenciais de Acesso")
 
 # Botão do tutorial fica desabilitado se estiver puxando dados (evita interrupção)
-if st.sidebar.button("ℹ️ Como obter os Tokens e o ID?", use_container_width=True, disabled=st.session_state['is_fetching']):
+if st.sidebar.button("ℹ️ Como obter os Tokens e o ID?", width='stretch', disabled=st.session_state['is_fetching']):
     mostrar_tutorial_tokens()
 
 st.sidebar.markdown("Preencha as informações para buscar os dados via API.")
@@ -171,7 +171,7 @@ id_campanha = st.sidebar.text_input("ID da Campanha (Pesquisa)", placeholder="ex
 
 st.sidebar.markdown("---")
 st.sidebar.markdown('<div class="btn-reset">', unsafe_allow_html=True)
-if st.sidebar.button("🔄 Iniciar Nova Validação (Limpar Dados)", use_container_width=True):
+if st.sidebar.button("🔄 Iniciar Nova Validação (Limpar Dados)", width='stretch'):
     st.session_state.clear()
     st.rerun()
 st.sidebar.markdown('</div>', unsafe_allow_html=True)
@@ -235,7 +235,7 @@ with aba_estrutura:
     data_pesquisa = st.date_input("Selecione a Data da Pesquisa para Validação")
     st.markdown("### 📥 Importação de Bases via API")
     
-    if st.button("🚀 Puxar Dados da Estrutura", use_container_width=True):
+    if st.button("🚀 Puxar Dados da Estrutura", width='stretch'):
         if not tenant or not token_hub:
             st.warning("⚠️ Por favor, preencha o **Tenant** e o **Token do People Hub** na barra lateral antes de puxar os dados.")
         else:
@@ -445,7 +445,7 @@ with aba_estrutura:
             df_func_sem_area['Data de Início'] = df_func_sem_area['id'].map(mapa_datas_inicio)
             df_exibicao_area = df_func_sem_area[['Nome Completo', 'email', 'Data de Início']]
             
-            st.dataframe(df_exibicao_area.style.apply(cor_fundo_erro, axis=1), use_container_width=True, hide_index=True)
+            st.dataframe(df_exibicao_area.style.apply(cor_fundo_erro, axis=1), width='stretch', hide_index=True)
         else:
             st.toast("✅ Todos os funcionários ativos possuem uma área vinculada.", icon="✅")
 
@@ -565,7 +565,7 @@ with aba_estrutura:
             df_func_sem_gestor['É Topo de Cadeia?'] = df_func_sem_gestor['id'].apply(lambda x: "Sim" if x in gestores_raiz else "Não")
             df_exibicao_gestor = df_func_sem_gestor[['Nome Completo', 'email', 'Data de Início', 'É Topo de Cadeia?']]
             
-            st.dataframe(df_exibicao_gestor.style.apply(cor_fundo_erro, axis=1), use_container_width=True, hide_index=True)
+            st.dataframe(df_exibicao_gestor.style.apply(cor_fundo_erro, axis=1), width='stretch', hide_index=True)
         else:
             st.toast("✅ Todos os funcionários ativos possuem um gestor vinculado.", icon="✅")
 
@@ -626,7 +626,7 @@ with aba_estrutura:
             if not df_excel_arvore_gestores.empty: df_excel_arvore_gestores.to_excel(writer, index=False, sheet_name='Arvore_Gestores')
                 
         excel_data = output_excel.getvalue()
-        col1.download_button(label="📊 Exportar para Excel (.xlsx)", data=excel_data, file_name=f"Estrutura_{data_pesquisa.strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        col1.download_button(label="📊 Exportar para Excel (.xlsx)", data=excel_data, file_name=f"Estrutura_{data_pesquisa.strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width='stretch')
 
         pdf = FPDF()
         pdf.add_page()
@@ -662,7 +662,7 @@ with aba_estrutura:
                 pdf_data = f.read()
         os.remove(tmp.name) 
 
-        col2.download_button(label="📄 Exportar Pendências para PDF (.pdf)", data=pdf_data, file_name=f"Pendencias_Estrutura_{data_pesquisa.strftime('%Y%m%d')}.pdf", mime="application/pdf", use_container_width=True)
+        col2.download_button(label="📄 Exportar Pendências para PDF (.pdf)", data=pdf_data, file_name=f"Pendencias_Estrutura_{data_pesquisa.strftime('%Y%m%d')}.pdf", mime="application/pdf", width='stretch')
 
         # --- 4. EXPORTAÇÃO DINÂMICA (HTML) COM PLACEHOLDER VARIÁVEL ---
         st.markdown("---")
@@ -897,14 +897,14 @@ with aba_estrutura:
             data=html_areas,
             file_name=f"OrgChart_Areas_{data_pesquisa.strftime('%Y%m%d')}.html",
             mime="text/html",
-            use_container_width=True
+            width='stretch'
         )
         col4.download_button(
             label="🌍 Baixar Arquivo Dinâmico de Gestores (.html)",
             data=html_gestores,
             file_name=f"OrgChart_Gestores_{data_pesquisa.strftime('%Y%m%d')}.html",
             mime="text/html",
-            use_container_width=True
+            width='stretch'
         )
 
 # ==========================================
@@ -919,7 +919,7 @@ with aba_clima:
 
     st.markdown("### 📥 Importação de Bases da Pesquisa")
     
-    if st.button("🚀 Puxar Dados da Pesquisa de Clima", use_container_width=True):
+    if st.button("🚀 Puxar Dados da Pesquisa de Clima", width='stretch'):
         if not tenant or not token_pesquisas or not id_campanha:
             st.warning("⚠️ Por favor, preencha o **Tenant**, o **Token do Pesquisas** e o **ID da Campanha** na barra lateral.")
         elif not id_campanha.strip().isdigit():
@@ -1215,5 +1215,5 @@ with aba_clima:
             data=excel_clima_data, 
             file_name=f"Relatorio_Clima_Campanha_{id_campanha}.xlsx", 
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
+            width='stretch'
         )
