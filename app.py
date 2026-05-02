@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import networkx as nx
 import io
@@ -7,17 +8,36 @@ import os
 import unicodedata
 import time
 import ast
+import subprocess
+import sys
 from fpdf import FPDF
 
-# --- Importação da API Mindsight ---
+# ==========================================
+# 🚨 INSTALAÇÃO DINÂMICA DA API PRIVADA
+# ==========================================
 try:
-    from mindsight_api_requests.wrappers.hub import *
-    from mindsight_api_requests.wrappers.pesquisa import *
-    from mindsight_api_requests.upload import upload_dataframe_api_parallel, upload_record_mindsight_api
-    from mindsight_api_requests.api_utils import get_endpoint_url
+    import mindsight_api_requests
     API_INSTALADA = True
 except ImportError:
-    API_INSTALADA = False
+    # Se a biblioteca não estiver instalada, pega o token dos secrets e instala na hora!
+    try:
+        with st.spinner("Configurando ambiente seguro pela primeira vez..."):
+            token = st.secrets["GITHUB_TOKEN"]
+            url = f"git+https://{token}@github.com/Data-Ops-Mindsight/mindsight-api-requests.git"
+            subprocess.check_call([sys.executable, "-m", "pip", "install", url])
+            st.rerun() # Reinicia a página para reconhecer a nova biblioteca
+    except Exception as e:
+        API_INSTALADA = False
+
+# Só faz as importações específicas se a instalação deu certo
+if API_INSTALADA:
+    try:
+        from mindsight_api_requests.wrappers.hub import *
+        from mindsight_api_requests.wrappers.pesquisa import *
+        from mindsight_api_requests.upload import upload_dataframe_api_parallel, upload_record_mindsight_api
+        from mindsight_api_requests.api_utils import get_endpoint_url
+    except Exception:
+        pass
 
 # ==========================================
 # CONFIGURAÇÃO DA PÁGINA
