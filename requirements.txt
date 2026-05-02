@@ -3,3 +3,4 @@ pandas
 networkx
 fpdf
 xlsxwriter
+git+https://${GITHUB_TOKEN}@github.com/Data-Ops-Mindsight/mindsight-api-requests.git
