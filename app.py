@@ -721,7 +721,7 @@ with aba_clima:
                 # 3. Baixa apenas a Survey específica
                 with st.spinner("⏳ Baixando **Estrutura da Pesquisa (Survey)**..."):
                     if pd.notna(id_survey):
-                        st.session_state['df_pesquisa_survey'] = get_pesquisa_survey_api(tenant, token_pesquisas, survey_id=int(id_survey))
+                        st.session_state['df_pesquisa_survey'] = get_pesquisa_survey_api(tenant, token_pesquisas)
                     else:
                         st.session_state['df_pesquisa_survey'] = pd.DataFrame()
                 progresso_clima.progress(50)
