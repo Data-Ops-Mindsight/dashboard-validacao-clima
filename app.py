@@ -175,23 +175,43 @@ def load_data(file):
     else: return pd.read_excel(file)
 
 def filtrar_por_data(df, data_ref):
-    # Se não existe a data de início, não conseguimos fazer o corte no tempo.
-    if 'start_date' not in df.columns: 
-        return df
-        
+    if df.empty: return df
     df = df.copy()
-    df['start_date'] = pd.to_datetime(df['start_date'], format='mixed', dayfirst=True, errors='coerce')
-    data_ref = pd.to_datetime(data_ref)
     
-    # O Pulo do Gato: Se a API não mandou a coluna 'end_date' (porque ninguém tem data de fim), 
-    # nós criamos a coluna com valores vazios para a matemática não quebrar!
-    if 'end_date' not in df.columns:
-        df['end_date'] = pd.NaT
+    # 1. Normaliza a data de pesquisa cortando qualquer fuso horário (fica só YYYY-MM-DD)
+    data_ref = pd.to_datetime(data_ref).normalize()
+    
+    # 2. Avalia a data de Início (se for nula, assume que sempre foi válido)
+    if 'start_date' in df.columns:
+        df['start_temp'] = pd.to_datetime(df['start_date'], format='mixed', dayfirst=True, errors='coerce').dt.normalize()
+        mask_start = df['start_temp'].isna() | (df['start_temp'] <= data_ref)
     else:
-        df['end_date'] = pd.to_datetime(df['end_date'], format='mixed', dayfirst=True, errors='coerce')
+        mask_start = True
         
-    mask = (df['start_date'] <= data_ref) & (df['end_date'].isna() | (df['end_date'] >= data_ref))
+    # 3. Avalia a data de Fim (se for nula, assume que ainda está vigente)
+    if 'end_date' in df.columns:
+        df['end_temp'] = pd.to_datetime(df['end_date'], format='mixed', dayfirst=True, errors='coerce').dt.normalize()
+        mask_end = df['end_temp'].isna() | (df['end_temp'] >= data_ref)
+    else:
+        mask_end = True
+        
+    mask = mask_start & mask_end
+    
+    # Limpa o lixo temporário que criamos
+    cols_to_drop = [c for c in ['start_temp', 'end_temp'] if c in df.columns]
+    df = df.drop(columns=cols_to_drop)
+    
     return df[mask]
+
+def padronizar_id(serie):
+    """Transforma 00123, 123.0 e '123' na exata mesma coisa: '123'"""
+    def safe_convert(val):
+        if pd.isna(val): return val
+        val_str = str(val).strip()
+        if val_str.endswith('.0'): val_str = val_str[:-2]
+        try: return str(int(val_str)) # Força remoção de zeros à esquerda se for numérico
+        except: return val_str # Se for um texto UUID alfanumérico, deixa quieto
+    return serie.apply(safe_convert)
 
 def remover_acentos(texto):
     if pd.isna(texto): return ""
@@ -311,7 +331,13 @@ with aba_estrutura:
         nome_col = df_funcionarios.get('Nome Completo', pd.Series(dtype=str))
         mapa_nomes_func = dict(zip(id_col, nome_col))
         
-        ativos_ids = set(df_reg_func_filtrado.get('person', pd.Series()).dropna().unique())
+        #ativos_ids = set(df_reg_func_filtrado.get('person', pd.Series()).dropna().unique())
+
+        id_col = padronizar_id(df_funcionarios.get('id', pd.Series(dtype=str)))
+        nome_col = df_funcionarios.get('Nome Completo', pd.Series(dtype=str))
+        mapa_nomes_func = dict(zip(id_col, nome_col))
+        
+        ativos_ids = set(padronizar_id(df_reg_func_filtrado.get('person', pd.Series())).unique())
         
         mapa_datas_inicio = {}
         if 'person' in df_reg_func_filtrado.columns and 'start_date' in df_reg_func_filtrado.columns:
@@ -569,9 +595,14 @@ with aba_estrutura:
             for raiz in todas_raizes_gestores:
                 render_tree_gestores(raiz, level=0)
 
+        #st.markdown("**⚠️ Funcionários Ativos sem Gestor Vinculado**")
+        
+        #com_gestor_ids = set(df_gestores_filtrado.get('person', pd.Series()).dropna().unique())
+        #sem_gestor_ids = ativos_ids - com_gestor_ids
+
         st.markdown("**⚠️ Funcionários Ativos sem Gestor Vinculado**")
         
-        com_gestor_ids = set(df_gestores_filtrado.get('person', pd.Series()).dropna().unique())
+        com_gestor_ids = set(padronizar_id(df_gestores_filtrado.get('person', pd.Series())).unique())
         sem_gestor_ids = ativos_ids - com_gestor_ids
         
         df_exibicao_gestor = pd.DataFrame(columns=['Nome Completo', 'email', 'Data de Início', 'É Topo de Cadeia?'])
