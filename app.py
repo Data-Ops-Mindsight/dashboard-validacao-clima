@@ -273,6 +273,25 @@ with aba_estrutura:
         df_funcionarios = st.session_state.get('df_funcionarios', pd.DataFrame())
         df_reg_func = st.session_state.get('df_reg_func', pd.DataFrame())
         df_gestores = st.session_state.get('df_gestores', pd.DataFrame())
+
+        # ==========================================
+        # 🕵️ MODO DETETIVE (APAGAR DEPOIS)
+        # ==========================================
+        with st.expander("🕵️ DADOS CRUS DA API (MODO DETETIVE)", expanded=True):
+            st.markdown("Copie o texto abaixo e mande para o Gemini:")
+            
+            st.write("**1. Tipos de Dados:**")
+            st.write({"Gestores": str(df_gestores.dtypes.to_dict()), "Areas": str(df_areas_func.dtypes.to_dict())})
+            
+            st.write("**2. Amostra Crua de Gestores (3 linhas):**")
+            # Tenta pegar as colunas principais se elas existirem
+            cols_gestores = [c for c in ['person', 'manager', 'start_date', 'end_date'] if c in df_gestores.columns]
+            st.json(df_gestores[cols_gestores].head(3).to_dict(orient='records'))
+            
+            st.write("**3. Amostra Crua de Áreas (3 linhas):**")
+            cols_areas = [c for c in ['person', 'area', 'start_date', 'end_date'] if c in df_areas_func.columns]
+            st.json(df_areas_func[cols_areas].head(3).to_dict(orient='records'))
+        # ==========================================
         
         df_areas_func_filtrado = filtrar_por_data(df_areas_func, data_pesquisa)
         df_hierarquia_filtrado = filtrar_por_data(df_hierarquia, data_pesquisa)
