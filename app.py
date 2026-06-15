@@ -144,24 +144,29 @@ def load_data(file):
     else: return pd.read_excel(file)
 
 def filtrar_por_data(df, data_ref):
-    """Filtro de data rigoroso. Se não tiver start_date válido, exclui."""
     if df.empty or 'start_date' not in df.columns: 
         return df
     
     df = df.copy()
     data_ref = pd.to_datetime(data_ref).normalize()
     
-    # Datas de início com erro viram NaT. Se for NaT, o Pandas retorna False na checagem <= data_ref (evita inflar ativos)
-    start_dt = pd.to_datetime(df['start_date'], format='mixed', dayfirst=True, errors='coerce').dt.normalize()
+    # Converte e arranca fuso horário na marra para não ter conflito de horas
+    df['start_dt'] = pd.to_datetime(df['start_date'], format='mixed', dayfirst=True, errors='coerce')
+    if df['start_dt'].dt.tz is not None:
+        df['start_dt'] = df['start_dt'].dt.tz_localize(None)
+    df['start_dt'] = df['start_dt'].dt.normalize()
     
-    # Se não existe end_date no sistema do cliente, cria tudo como NaT (ativo para sempre)
     if 'end_date' not in df.columns:
-        end_dt = pd.Series([pd.NaT] * len(df), index=df.index)
+        df['end_dt'] = pd.NaT
     else:
-        end_dt = pd.to_datetime(df['end_date'], format='mixed', dayfirst=True, errors='coerce').dt.normalize()
+        df['end_dt'] = pd.to_datetime(df['end_date'], format='mixed', dayfirst=True, errors='coerce')
+        if df['end_dt'].dt.tz is not None:
+            df['end_dt'] = df['end_dt'].dt.tz_localize(None)
+        df['end_dt'] = df['end_dt'].dt.normalize()
         
-    mask = (start_dt <= data_ref) & (end_dt.isna() | (end_dt >= data_ref))
-    return df[mask]
+    mask = (df['start_dt'] <= data_ref) & (df['end_dt'].isna() | (df['end_dt'] >= data_ref))
+    
+    return df.drop(columns=['start_dt', 'end_dt'])[mask]
 
 def padronizar_id(serie):
     """Transforma 00123, 123.0 e '123' na exata mesma coisa: '123'"""
@@ -275,22 +280,31 @@ with aba_estrutura:
         df_gestores = st.session_state.get('df_gestores', pd.DataFrame())
 
         # ==========================================
-        # 🕵️ MODO DETETIVE (APAGAR DEPOIS)
+        # 🕵️ RASTREADOR DE FUNCIONÁRIO (MODO DETETIVE)
         # ==========================================
-        with st.expander("🕵️ DADOS CRUS DA API (MODO DETETIVE)", expanded=True):
-            st.markdown("Copie o texto abaixo e mande para o Gemini:")
+        with st.expander("🕵️ RASTREADOR DE FUNCIONÁRIO (MODO DETETIVE)", expanded=True):
+            st.markdown("Digite o ID do funcionário que está caindo na lista de 'Sem Gestor'/'Sem Área' por engano para ver como ele veio da API:")
+            id_rastreio = st.text_input("ID do Funcionário (ex: 1551)")
             
-            st.write("**1. Tipos de Dados:**")
-            st.write({"Gestores": str(df_gestores.dtypes.to_dict()), "Areas": str(df_areas_func.dtypes.to_dict())})
-            
-            st.write("**2. Amostra Crua de Gestores (3 linhas):**")
-            # Tenta pegar as colunas principais se elas existirem
-            cols_gestores = [c for c in ['person', 'manager', 'start_date', 'end_date'] if c in df_gestores.columns]
-            st.json(df_gestores[cols_gestores].head(3).to_dict(orient='records'))
-            
-            st.write("**3. Amostra Crua de Áreas (3 linhas):**")
-            cols_areas = [c for c in ['person', 'area', 'start_date', 'end_date'] if c in df_areas_func.columns]
-            st.json(df_areas_func[cols_areas].head(3).to_dict(orient='records'))
+            if id_rastreio:
+                id_rastreio_str = padronizar_id(pd.Series([id_rastreio]))[0]
+                
+                st.write(f"### Raio-X do Funcionário ID: {id_rastreio_str}")
+                
+                if not df_reg_func.empty:
+                    st.write("**1. Contratos (df_reg_func - Bruto)**")
+                    df_r_alvo = df_reg_func[padronizar_id(df_reg_func['person']) == id_rastreio_str]
+                    st.dataframe(df_r_alvo[['person', 'start_date', 'end_date']] if not df_r_alvo.empty else df_r_alvo)
+                
+                if not df_areas_func.empty:
+                    st.write("**2. Áreas (df_areas_func - Bruto)**")
+                    df_a_alvo = df_areas_func[padronizar_id(df_areas_func['person']) == id_rastreio_str]
+                    st.dataframe(df_a_alvo[['person', 'area', 'start_date', 'end_date']] if not df_a_alvo.empty else df_a_alvo)
+                
+                if not df_gestores.empty:
+                    st.write("**3. Gestores (df_gestores - Bruto)**")
+                    df_g_alvo = df_gestores[padronizar_id(df_gestores['person']) == id_rastreio_str]
+                    st.dataframe(df_g_alvo[['person', 'manager', 'start_date', 'end_date']] if not df_g_alvo.empty else df_g_alvo)
         # ==========================================
         
         df_areas_func_filtrado = filtrar_por_data(df_areas_func, data_pesquisa)
