@@ -769,25 +769,30 @@ with aba_clima:
             if not pesquisa_atual.empty and 'name' in pesquisa_atual.columns:
                 nome_pesquisa = pesquisa_atual['name'].values[0]
 
-        # --- EXATAMENTE A SUA LÓGICA DE FILTRO ---
+        # --- LÓGICA DE FILTRO SEGURA DA SURVEY ---
+        id_survey_vinculada = None
         try:
-            if not df_survey_full.empty and 'id' in df_survey_full.columns:
-                # 1. Filtra a survey pelo id da campanha
-                df_survey_filtrado = df_survey_full.loc[df_survey_full['id'] == int(id_campanha)]
+            # 1. Primeiro descobrirmos qual é o ID da Survey (Pesquisa) que a Campanha usa
+            if not df_camp.empty and 'id' in df_camp.columns:
+                pesquisa_atual = df_camp[df_camp['id'].astype(str) == str(id_campanha).strip()]
+                if not pesquisa_atual.empty and 'survey.id' in pesquisa_atual.columns:
+                    id_survey_vinculada = pesquisa_atual['survey.id'].values[0]
+                    
+            # 2. Agora filtramos a tabela de Surveys usando o ID DA SURVEY (e não o da campanha)
+            if id_survey_vinculada is not None and not df_survey_full.empty and 'id' in df_survey_full.columns:
+                df_survey_filtrado = df_survey_full.loc[df_survey_full['id'] == int(id_survey_vinculada)]
                 
                 if not df_survey_filtrado.empty and 'questions.title' in df_survey_filtrado.columns:
-                    # 2. Pega os títulos das perguntas
                     lista_titulos_validos = df_survey_filtrado['questions.title'].dropna().unique().tolist()
                     
                     if not df_choice_total.empty and 'title' in df_choice_total.columns:
-                        # 3. Filtra as choices
                         df_choice = df_choice_total[df_choice_total['title'].isin(lista_titulos_validos)].copy()
                     else:
                         st.warning("A base de perguntas (choices) puxada da API está vazia.")
                 else:
-                    st.warning("Não foram encontradas perguntas associadas à estrutura desta Survey ou a coluna questions.title está ausente.")
+                    st.warning(f"A Survey vinculada (ID {id_survey_vinculada}) não tem perguntas associadas no sistema ou a coluna questions.title está ausente.")
             else:
-                st.error("A tabela de Surveys (survey_admin) está vazia ou sem a coluna 'id'.")
+                st.error("Não foi possível encontrar o vínculo da Campanha com a Survey (coluna 'survey.id') ou a tabela de Surveys está vazia.")
         except Exception as e:
             st.error(f"🚨 Erro inesperado ao aplicar o filtro de perguntas: {e}")
 
