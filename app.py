@@ -7,7 +7,15 @@ import os
 import unicodedata
 import time
 import ast
+import json
 from fpdf import FPDF
+
+# --- Importação da IA ---
+try:
+    import google.generativeai as genai
+    GENAI_INSTALADO = True
+except ImportError:
+    GENAI_INSTALADO = False
 
 # --- Importa as nossas próprias funções locais ---
 try:
@@ -27,7 +35,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# INICIALIZAÇÃO DO ESTADO DE MEMÓRIA
+# INICIALIZAÇÃO DO ESTADO DE MEMÓRIA E SECRETS
 # ==========================================
 if 'dados_carregados' not in st.session_state:
     st.session_state['dados_carregados'] = False
@@ -36,126 +44,85 @@ if 'dados_clima_carregados' not in st.session_state:
 if 'is_fetching' not in st.session_state:
     st.session_state['is_fetching'] = False
 
+try:
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+except:
+    GEMINI_API_KEY = None
+
 # ==========================================
 # INJEÇÃO DE CSS PREMIUM (PALETA MINDSIGHT)
 # ==========================================
 st.markdown("""
     <style>
-    /* Fundo Escuro Minimalista e Remoção do Topo (Deploy) */
-    .stApp {
-        background-color: #09030f;
-        color: #ffffff;
-    }
-    header[data-testid="stHeader"] {
-        background-color: transparent !important;
-    }
-    /* Menu Lateral Escuro com nuance roxa */
-    [data-testid="stSidebar"] {
-        background-color: #120520 !important;
-    }
-    /* Estilização dos Botões com Gradiente Roxo */
+    .stApp { background-color: #09030f; color: #ffffff; }
+    header[data-testid="stHeader"] { background-color: transparent !important; }
+    [data-testid="stSidebar"] { background-color: #120520 !important; }
     div.stButton > button:first-child {
         background: linear-gradient(90deg, #6200ea 0%, #b500ff 100%);
-        color: white;
-        border: none;
-        border-radius: 6px;
-        font-weight: bold;
-        box-shadow: 0px 4px 10px rgba(181, 0, 255, 0.3);
-        transition: all 0.3s ease;
+        color: white; border: none; border-radius: 6px; font-weight: bold;
+        box-shadow: 0px 4px 10px rgba(181, 0, 255, 0.3); transition: all 0.3s ease;
     }
     div.stButton > button:first-child:hover {
         background: linear-gradient(90deg, #b500ff 0%, #6200ea 100%);
-        transform: translateY(-2px);
-        box-shadow: 0px 6px 15px rgba(181, 0, 255, 0.5);
+        transform: translateY(-2px); box-shadow: 0px 6px 15px rgba(181, 0, 255, 0.5);
     }
-    div.stButton > button:first-child:disabled {
-        background: #333333;
-        color: #888888;
-        box-shadow: none;
-        transform: none;
-    }
-    /* Botão de Reset Secundário na Sidebar */
+    div.stButton > button:first-child:disabled { background: #333333; color: #888888; box-shadow: none; transform: none; }
     .btn-reset > div > button {
-        background: transparent !important;
-        border: 1px solid #b500ff !important;
-        box-shadow: none !important;
-        color: #b500ff !important;
+        background: transparent !important; border: 1px solid #b500ff !important;
+        box-shadow: none !important; color: #b500ff !important;
     }
-    .btn-reset > div > button:hover {
-        background: rgba(181, 0, 255, 0.1) !important;
-    }
-    /* Números dos KPIs e Quebra de Linha para Títulos Longos */
-    div[data-testid="stMetricValue"] {
-        color: #d884ff;
-    }
+    .btn-reset > div > button:hover { background: rgba(181, 0, 255, 0.1) !important; }
+    div[data-testid="stMetricValue"] { color: #d884ff; }
     div[data-testid="stMetricValue"] > div {
-        white-space: normal !important;
-        word-wrap: break-word !important;
-        overflow: visible !important;
-        text-overflow: clip !important;
-        line-height: 1.2;
+        white-space: normal !important; word-wrap: break-word !important;
+        overflow: visible !important; text-overflow: clip !important; line-height: 1.2;
     }
-    /* Tabs (Abas) */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 20px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        color: #b0b0b0;
-    }
-    .stTabs [aria-selected="true"] {
-        color: #b500ff !important;
-        border-bottom-color: #b500ff !important;
-    }
+    .stTabs [data-baseweb="tab-list"] { gap: 20px; }
+    .stTabs [data-baseweb="tab"] { color: #b0b0b0; }
+    .stTabs [aria-selected="true"] { color: #b500ff !important; border-bottom-color: #b500ff !important; }
     </style>
 """, unsafe_allow_html=True)
 
 st.title("🔍 Dashboard de Validação")
 
-# ==========================================
-# FUNÇÃO DA TELA FLUTUANTE (MODAL/DIALOG)
-# ==========================================
 @st.dialog("ℹ️ Como obter os Tokens e o ID da Pesquisa?")
 def mostrar_tutorial_tokens():
     st.markdown("""
     **1. Token do People Hub**
-    * Acesse o Django do People Hub do cliente (ex: <span style="word-break: break-all; color:#d884ff;">*https://hub.mindsight.com.br/tenant/staff/*</span>).
-    * Clique em **Mindsight token extension libs**.
-    * **Novo token:** Clique em *Adicionar mindsight token extension*, busque seu usuário na lupa, selecione-o e clique em *Salvar*. O token irá para o seu e-mail (válido por 14 dias).
-    * **Renovar token:** Marque a caixinha do seu usuário, vá na seleção "Ação" e escolha **Recreate token**.
+    * Acesse o Django do People Hub do cliente.
+    * Clique em **Mindsight token extension libs** > Novo token > Salvar.
+    * **Renovar token:** Marque a caixinha do usuário > "Ação" > **Recreate token**.
 
     **2. Token do Pesquisas**
-    * Acesse o Django do Pesquisas (ex: <span style="word-break: break-all; color:#d884ff;">*https://pesquisa.mindsight.com.br/tenant/admin/*</span>).
-    * Siga os mesmos passos acima para gerar ou renovar seu token.
+    * Acesse o Django do Pesquisas e siga os mesmos passos acima.
 
     **3. ID da Campanha (Pesquisa)**
-    * No Django do Pesquisas, vá em **Campaigns**.
-    * Clique na pesquisa que deseja validar.
-    * O número da pesquisa é o que está na URL após "campaign/". 
-    * *Ex:* Em <span style="word-break: break-all; color:#d884ff;">*https://pesquisa.mindsight.com.br/tenant/admin/survey/campaign/2/change/*</span>, o ID é **2**.
+    * No Django do Pesquisas, vá em **Campaigns**. Clique na pesquisa que deseja validar.
+    * O número da pesquisa é o que está na URL após "campaign/". Ex: em `...campaign/2/change/`, o ID é **2**.
     """, unsafe_allow_html=True)
 
-# ==========================================
-# BARRA LATERAL: LOGO E CREDENCIAIS
-# ==========================================
-st.sidebar.image("preview_mind.png", width='stretch')
-
+st.sidebar.image("preview_mind.png", use_container_width=True)
 st.sidebar.header("🔑 Credenciais de Acesso")
 
-# Botão do tutorial fica desabilitado se estiver puxando dados (evita interrupção)
-if st.sidebar.button("ℹ️ Como obter os Tokens e o ID?", width='stretch', disabled=st.session_state['is_fetching']):
+if st.sidebar.button("ℹ️ Como obter os Tokens e o ID?", use_container_width=True, disabled=st.session_state['is_fetching']):
     mostrar_tutorial_tokens()
 
 st.sidebar.markdown("Preencha as informações para buscar os dados via API.")
-
-# Usando keys para podermos limpar os campos via código
 tenant = st.sidebar.text_input("Tenant do Cliente", placeholder="ex: universal", key="input_tenant")
 token_hub = st.sidebar.text_input("Token do People Hub", placeholder="Insira o token do Hub", key="input_token_hub")
 token_pesquisas = st.sidebar.text_input("Token do Pesquisas", placeholder="Insira o token de Pesquisas", key="input_token_pesquisas")
 id_campanha = st.sidebar.text_input("ID da Campanha (Pesquisa)", placeholder="ex: 2", key="input_id_campanha")
 
 st.sidebar.markdown("---")
+st.sidebar.header("🤖 Auditoria Inteligente")
+if GEMINI_API_KEY:
+    st.sidebar.success("✅ Motor semântico conectado via Secrets!")
+else:
+    st.sidebar.warning("⚠️ Auditoria avançada desativada (Chave não encontrada).")
+
+st.sidebar.markdown("---")
 st.sidebar.markdown('<div class="btn-reset">', unsafe_allow_html=True)
-if st.sidebar.button("🔄 Iniciar Nova Validação (Limpar Dados)", width='stretch'):
+if st.sidebar.button("🔄 Iniciar Nova Validação (Limpar Dados)", use_container_width=True):
     st.session_state.clear()
     st.rerun()
 st.sidebar.markdown('</div>', unsafe_allow_html=True)
@@ -168,49 +135,42 @@ aba_estrutura, aba_clima = st.tabs([
     "🌤️ Validação de Pesquisa de Clima"
 ])
 
-# Funções auxiliares 
+# ==========================================
+# FUNÇÕES AUXILIARES SEGURAS
+# ==========================================
 @st.cache_data
 def load_data(file):
     if file.name.endswith('.csv'): return pd.read_csv(file)
     else: return pd.read_excel(file)
 
 def filtrar_por_data(df, data_ref):
-    if df.empty: return df
-    df = df.copy()
+    """Filtro de data rigoroso. Se não tiver start_date válido, exclui."""
+    if df.empty or 'start_date' not in df.columns: 
+        return df
     
-    # 1. Normaliza a data de pesquisa cortando qualquer fuso horário (fica só YYYY-MM-DD)
+    df = df.copy()
     data_ref = pd.to_datetime(data_ref).normalize()
     
-    # 2. Avalia a data de Início (se for nula, assume que sempre foi válido)
-    if 'start_date' in df.columns:
-        df['start_temp'] = pd.to_datetime(df['start_date'], format='mixed', dayfirst=True, errors='coerce').dt.normalize()
-        mask_start = df['start_temp'].isna() | (df['start_temp'] <= data_ref)
-    else:
-        mask_start = True
-        
-    # 3. Avalia a data de Fim (se for nula, assume que ainda está vigente)
-    if 'end_date' in df.columns:
-        df['end_temp'] = pd.to_datetime(df['end_date'], format='mixed', dayfirst=True, errors='coerce').dt.normalize()
-        mask_end = df['end_temp'].isna() | (df['end_temp'] >= data_ref)
-    else:
-        mask_end = True
-        
-    mask = mask_start & mask_end
+    # Datas de início com erro viram NaT. Se for NaT, o Pandas retorna False na checagem <= data_ref (evita inflar ativos)
+    start_dt = pd.to_datetime(df['start_date'], format='mixed', dayfirst=True, errors='coerce').dt.normalize()
     
-    # Limpa o lixo temporário que criamos
-    cols_to_drop = [c for c in ['start_temp', 'end_temp'] if c in df.columns]
-    df = df.drop(columns=cols_to_drop)
-    
+    # Se não existe end_date no sistema do cliente, cria tudo como NaT (ativo para sempre)
+    if 'end_date' not in df.columns:
+        end_dt = pd.Series([pd.NaT] * len(df), index=df.index)
+    else:
+        end_dt = pd.to_datetime(df['end_date'], format='mixed', dayfirst=True, errors='coerce').dt.normalize()
+        
+    mask = (start_dt <= data_ref) & (end_dt.isna() | (end_dt >= data_ref))
     return df[mask]
 
 def padronizar_id(serie):
     """Transforma 00123, 123.0 e '123' na exata mesma coisa: '123'"""
     def safe_convert(val):
-        if pd.isna(val): return val
+        if pd.isna(val): return ""
         val_str = str(val).strip()
         if val_str.endswith('.0'): val_str = val_str[:-2]
-        try: return str(int(val_str)) # Força remoção de zeros à esquerda se for numérico
-        except: return val_str # Se for um texto UUID alfanumérico, deixa quieto
+        try: return str(int(val_str))
+        except: return val_str
     return serie.apply(safe_convert)
 
 def remover_acentos(texto):
@@ -249,7 +209,7 @@ with aba_estrutura:
     data_pesquisa = st.date_input("Selecione a Data da Pesquisa para Validação")
     st.markdown("### 📥 Importação de Bases via API")
     
-    if st.button("🚀 Puxar Dados da Estrutura", width='stretch'):
+    if st.button("🚀 Puxar Dados da Estrutura", use_container_width=True):
         if not tenant or not token_hub:
             st.warning("⚠️ Por favor, preencha o **Tenant** e o **Token do People Hub** na barra lateral antes de puxar os dados.")
         else:
@@ -327,30 +287,21 @@ with aba_estrutura:
             df_funcionarios['Nome Completo'] = (primeiro_nome + " " + ultimo_nome).str.strip()
             df_funcionarios['Nome Completo'] = df_funcionarios['Nome Completo'].replace('', 'Desconhecido')
 
-        # id_col = df_funcionarios.get('id', pd.Series(dtype=str))
-        # nome_col = df_funcionarios.get('Nome Completo', pd.Series(dtype=str))
-        # mapa_nomes_func = dict(zip(id_col, nome_col))
+        # === AQUI ESTAVA O PROBLEMA DA TABELA VAZIA ===
+        # Cria a coluna limpa na tabela mãe para os filtros de exibição
+        df_funcionarios['id_clean'] = padronizar_id(df_funcionarios.get('id', pd.Series(dtype=str)))
         
-        #ativos_ids = set(df_reg_func_filtrado.get('person', pd.Series()).dropna().unique())
-
-        id_col = padronizar_id(df_funcionarios.get('id', pd.Series(dtype=str)))
+        id_col = df_funcionarios['id_clean']
         nome_col = df_funcionarios.get('Nome Completo', pd.Series(dtype=str))
         mapa_nomes_func = dict(zip(id_col, nome_col))
         
-        ativos_ids = set(padronizar_id(df_reg_func_filtrado.get('person', pd.Series())).unique())
+        # Pega IDs Ativos limpinhos e remove vazios
+        ativos_ids = set(padronizar_id(df_reg_func_filtrado.get('person', pd.Series())).unique()) - {""}
         
-        #mapa_datas_inicio = {}
-        #if 'person' in df_reg_func_filtrado.columns and 'start_date' in df_reg_func_filtrado.columns:
-            #mapa_datas_inicio = df_reg_func_filtrado.groupby('person')['start_date'].max().dt.strftime('%d/%m/%Y').to_dict()
-
         mapa_datas_inicio = {}
         if 'person' in df_reg_func_filtrado.columns and 'start_date' in df_reg_func_filtrado.columns:
-            # Temos que usar o ID padronizado como chave do dicionário também
             df_reg_func_filtrado['person_str'] = padronizar_id(df_reg_func_filtrado['person'])
-            
-            # A CORREÇÃO: Garante que a coluna é um formato de Data/Hora válido antes de fazer a conta
             df_reg_func_filtrado['start_date'] = pd.to_datetime(df_reg_func_filtrado['start_date'], format='mixed', dayfirst=True, errors='coerce')
-            
             mapa_datas_inicio = df_reg_func_filtrado.groupby('person_str')['start_date'].max().dt.strftime('%d/%m/%Y').to_dict()
 
         mapa_nome_para_id = dict(zip(df_instancias.get('name', []), df_instancias.get('id', [])))
@@ -368,7 +319,6 @@ with aba_estrutura:
         col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
         col_kpi1.metric("👥 Total Colaboradores Ativos", len(ativos_ids))
         col_kpi2.metric("🏢 Total de Áreas Identificadas", len(df_instancias))
-        
         total_gestores = len(df_gestores_filtrado['manager'].dropna().unique()) if 'manager' in df_gestores_filtrado.columns else 0
         col_kpi3.metric("👔 Total de Gestores Identificados", total_gestores)
 
@@ -484,20 +434,20 @@ with aba_estrutura:
                 render_tree_areas(raiz, level=0)
 
         st.markdown("**⚠️ Funcionários Ativos sem Área Vinculada**")
-        
-        com_area_ids = set(df_areas_func_filtrado.get('person', pd.Series()).dropna().unique())
+        com_area_ids = set(padronizar_id(df_areas_func_filtrado.get('person', pd.Series())).unique()) - {""}
         sem_area_ids = ativos_ids - com_area_ids
         
         df_exibicao_area = pd.DataFrame(columns=['Nome Completo', 'email', 'Data de Início'])
         if sem_area_ids:
             st.warning(f"**{len(sem_area_ids)}** funcionário(s) com contrato ativo sem área vinculada nesta data.")
-            df_func_sem_area = df_funcionarios[df_funcionarios['id'].isin(sem_area_ids)].copy()
-            df_func_sem_area['Data de Início'] = df_func_sem_area.get('id', pd.Series()).map(mapa_datas_inicio)
+            # Filtra de forma garantida pela id_clean
+            df_func_sem_area = df_funcionarios[df_funcionarios['id_clean'].isin(sem_area_ids)].copy()
+            df_func_sem_area['Data de Início'] = df_func_sem_area['id_clean'].map(mapa_datas_inicio)
             
             if 'email' not in df_func_sem_area.columns: df_func_sem_area['email'] = ''
             df_exibicao_area = df_func_sem_area[['Nome Completo', 'email', 'Data de Início']]
             
-            st.dataframe(df_exibicao_area.style.apply(cor_fundo_erro, axis=1), width='stretch', hide_index=True)
+            st.dataframe(df_exibicao_area.style.apply(cor_fundo_erro, axis=1), use_container_width=True, hide_index=True)
         else:
             st.toast("✅ Todos os funcionários ativos possuem uma área vinculada.", icon="✅")
 
@@ -523,7 +473,7 @@ with aba_estrutura:
         if ciclos_gestores:
             st.error(f"🚨 **ATENÇÃO: Ciclos de Gestão Detectados! ({len(ciclos_gestores)} ciclo(s))**")
             for ciclo in ciclos_gestores:
-                caminho = " ➔ ".join([str(mapa_nomes_func.get(no, f"ID {no}")) for no in ciclo]) + f" ➔ {mapa_nomes_func.get(ciclo[0], f'ID {ciclo[0]}')}"
+                caminho = " ➔ ".join([str(mapa_nomes_func.get(padronizar_id(pd.Series([no]))[0], f"ID {no}")) for no in ciclo]) + f" ➔ {mapa_nomes_func.get(padronizar_id(pd.Series([ciclo[0]]))[0], f'ID {ciclo[0]}')}"
                 st.warning(f"Ciclo: {caminho}")
 
         def calcular_total_gestores_seguro(node, visited=None):
@@ -554,11 +504,11 @@ with aba_estrutura:
         with col_titulo_gestor:
             st.markdown("**Visualização da Estrutura de Gestão**")
         with col_busca_gestor:
-            opcoes_gestores = [None] + sorted(list(G_gestores.nodes()), key=lambda x: str(mapa_nomes_func.get(x, x)))
+            opcoes_gestores = [None] + sorted(list(G_gestores.nodes()), key=lambda x: str(mapa_nomes_func.get(padronizar_id(pd.Series([x]))[0], x)))
             alvo_gestor = st.selectbox(
                 "🔍 Buscar Gestor/Colaborador:", 
                 options=opcoes_gestores, 
-                format_func=lambda x: "--- Selecione um Nome ---" if x is None else f"{mapa_nomes_func.get(x, x)} (ID: {x})"
+                format_func=lambda x: "--- Selecione um Nome ---" if x is None else f"{mapa_nomes_func.get(padronizar_id(pd.Series([x]))[0], x)} (ID: {x})"
             )
 
         ancestrais_gestor = nx.ancestors(G_gestores, alvo_gestor) if alvo_gestor else set()
@@ -569,7 +519,7 @@ with aba_estrutura:
             visited.add(node)
             
             is_alvo = (node == alvo_gestor)
-            nome = mapa_nomes_func.get(node, f"Colaborador ID {node}")
+            nome = mapa_nomes_func.get(padronizar_id(pd.Series([node]))[0], f"Colaborador ID {node}")
             
             if is_alvo:
                 nome_expander = f"✨ <span style='color: #b500ff;'>**{nome}**</span> ✨"
@@ -605,31 +555,25 @@ with aba_estrutura:
             for raiz in todas_raizes_gestores:
                 render_tree_gestores(raiz, level=0)
 
-        #st.markdown("**⚠️ Funcionários Ativos sem Gestor Vinculado**")
-        
-        #com_gestor_ids = set(df_gestores_filtrado.get('person', pd.Series()).dropna().unique())
-        #sem_gestor_ids = ativos_ids - com_gestor_ids
-
         st.markdown("**⚠️ Funcionários Ativos sem Gestor Vinculado**")
         
-        com_gestor_ids = set(padronizar_id(df_gestores_filtrado.get('person', pd.Series())).unique())
+        com_gestor_ids = set(padronizar_id(df_gestores_filtrado.get('person', pd.Series())).unique()) - {""}
         sem_gestor_ids = ativos_ids - com_gestor_ids
         
         df_exibicao_gestor = pd.DataFrame(columns=['Nome Completo', 'email', 'Data de Início', 'É Topo de Cadeia?'])
         if sem_gestor_ids:
             st.warning(f"**{len(sem_gestor_ids)}** funcionário(s) com contrato ativo sem gestor superior nesta data.")
             
-            df_func_sem_gestor = df_funcionarios[df_funcionarios['id'].isin(sem_gestor_ids)].copy()
-            df_func_sem_gestor['Data de Início'] = df_func_sem_gestor.get('id', pd.Series()).map(mapa_datas_inicio)
+            df_func_sem_gestor = df_funcionarios[df_funcionarios['id_clean'].isin(sem_gestor_ids)].copy()
+            df_func_sem_gestor['Data de Início'] = df_func_sem_gestor['id_clean'].map(mapa_datas_inicio)
             df_func_sem_gestor['É Topo de Cadeia?'] = df_func_sem_gestor.get('id', pd.Series()).apply(lambda x: "Sim" if x in gestores_raiz else "Não")
             
             if 'email' not in df_func_sem_gestor.columns: df_func_sem_gestor['email'] = ''
             df_exibicao_gestor = df_func_sem_gestor[['Nome Completo', 'email', 'Data de Início', 'É Topo de Cadeia?']]
             
-            st.dataframe(df_exibicao_gestor.style.apply(cor_fundo_erro, axis=1), width='stretch', hide_index=True)
+            st.dataframe(df_exibicao_gestor.style.apply(cor_fundo_erro, axis=1), use_container_width=True, hide_index=True)
         else:
             st.toast("✅ Todos os funcionários ativos possuem um gestor vinculado.", icon="✅")
-
 
         # --- 3. EXPORTAÇÕES GERAIS ---
         def construir_tabela_arvore_areas(node, visited=None, level=0, rows=None):
@@ -687,7 +631,7 @@ with aba_estrutura:
             if not df_excel_arvore_gestores.empty: df_excel_arvore_gestores.to_excel(writer, index=False, sheet_name='Arvore_Gestores')
                 
         excel_data = output_excel.getvalue()
-        col1.download_button(label="📊 Exportar para Excel (.xlsx)", data=excel_data, file_name=f"Estrutura_{data_pesquisa.strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width='stretch')
+        col1.download_button(label="📊 Exportar para Excel (.xlsx)", data=excel_data, file_name=f"Estrutura_{data_pesquisa.strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         pdf = FPDF()
         pdf.add_page()
@@ -723,8 +667,7 @@ with aba_estrutura:
                 pdf_data = f.read()
         os.remove(tmp.name) 
 
-        col2.download_button(label="📄 Exportar Pendências para PDF (.pdf)", data=pdf_data, file_name=f"Pendencias_Estrutura_{data_pesquisa.strftime('%Y%m%d')}.pdf", mime="application/pdf", width='stretch')
-
+        col2.download_button(label="📄 Exportar Pendências para PDF (.pdf)", data=pdf_data, file_name=f"Pendencias_Estrutura_{data_pesquisa.strftime('%Y%m%d')}.pdf", mime="application/pdf", use_container_width=True)
 
 # ==========================================
 # ABA 2: PESQUISA DE CLIMA
@@ -738,7 +681,7 @@ with aba_clima:
 
     st.markdown("### 📥 Importação de Bases da Pesquisa")
     
-    if st.button("🚀 Puxar Dados da Pesquisa de Clima", width='stretch'):
+    if st.button("🚀 Puxar Dados da Pesquisa de Clima", use_container_width=True):
         if not tenant or not token_pesquisas or not id_campanha:
             st.warning("⚠️ Por favor, preencha o **Tenant**, o **Token do Pesquisas** e o **ID da Campanha** na barra lateral.")
         elif not id_campanha.strip().isdigit():
@@ -754,43 +697,28 @@ with aba_clima:
             try:
                 id_camp_int = int(id_campanha.strip())
 
-                # 1. Baixa Campanhas
                 with st.spinner("⏳ Baixando **Campanhas**..."):
-                    df_camp = get_pesquisa_campaigns_api(tenant, token_pesquisas)
-                    st.session_state['df_pesquisa_camp'] = df_camp
+                    st.session_state['df_pesquisa_camp'] = get_pesquisa_campaigns_api(tenant, token_pesquisas)
                 progresso_clima.progress(25)
                 logs_clima += "✅ Campanhas baixadas com sucesso!<br>"
                 hist_clima.markdown(logs_clima, unsafe_allow_html=True)
 
-                # 2. Identifica a Survey vinculada para poder baixar
-                id_survey = None
-                if not df_camp.empty and 'id' in df_camp.columns:
-                    camp_row = df_camp[df_camp['id'].astype(str) == str(id_camp_int)]
-                    if not camp_row.empty:
-                        id_survey = camp_row.get('survey.id', camp_row.get('survey', [None])).values[0]
-
-                # 3. Baixa apenas a Survey específica
-                with st.spinner("⏳ Baixando **Estrutura da Pesquisa (Survey)**..."):
-                    if pd.notna(id_survey):
-                        st.session_state['df_pesquisa_survey'] = get_pesquisa_survey_api(tenant, token_pesquisas)
-                    else:
-                        st.session_state['df_pesquisa_survey'] = pd.DataFrame()
-                progresso_clima.progress(50)
-                logs_clima += "✅ Estrutura da pesquisa mapeada com sucesso!<br>"
-                hist_clima.markdown(logs_clima, unsafe_allow_html=True)
-
-                # 4. Baixa as Perguntas
                 with st.spinner("⏳ Baixando **Perguntas (Choices)**..."):
                     st.session_state['df_pesquisa_choice'] = get_pesquisa_choice_question_api(tenant, token_pesquisas)
-                progresso_clima.progress(75)
-                logs_clima += "✅ Perguntas do banco baixadas com sucesso!<br>"
+                progresso_clima.progress(50)
+                logs_clima += "✅ Perguntas baixadas com sucesso!<br>"
                 hist_clima.markdown(logs_clima, unsafe_allow_html=True)
 
-                # 5. Baixa os Contatos
                 with st.spinner("⏳ Baixando **Contatos da Campanha**..."):
                     st.session_state['df_pesquisa_contatos'] = get_pesquisa_contact_api(tenant, token_pesquisas, id_camp_int)
-                progresso_clima.progress(100)
+                progresso_clima.progress(75)
                 logs_clima += "✅ Contatos baixados com sucesso!<br>"
+                hist_clima.markdown(logs_clima, unsafe_allow_html=True)
+
+                with st.spinner("⏳ Baixando **Estrutura da Pesquisa (Surveys)**..."):
+                    st.session_state['df_pesquisa_survey'] = get_pesquisa_survey_api(tenant, token_pesquisas)
+                progresso_clima.progress(100)
+                logs_clima += "✅ Estrutura mapeada com sucesso!<br>"
                 hist_clima.markdown(logs_clima, unsafe_allow_html=True)
 
                 st.session_state['dados_clima_carregados'] = True
@@ -814,7 +742,6 @@ with aba_clima:
         nome_pesquisa = "Nome Indisponível"
         df_choice = pd.DataFrame()
 
-        # Pegar o nome da campanha atual para o KPI
         if not df_camp.empty and 'id' in df_camp.columns:
             pesquisa_atual = df_camp[df_camp['id'].astype(str) == str(id_campanha).strip()]
             if not pesquisa_atual.empty and 'name' in pesquisa_atual.columns:
@@ -823,13 +750,11 @@ with aba_clima:
         # --- LÓGICA DE FILTRO SEGURA DA SURVEY ---
         id_survey_vinculada = None
         try:
-            # 1. Primeiro descobrirmos qual é o ID da Survey (Pesquisa) que a Campanha usa
             if not df_camp.empty and 'id' in df_camp.columns:
                 pesquisa_atual = df_camp[df_camp['id'].astype(str) == str(id_campanha).strip()]
                 if not pesquisa_atual.empty and 'survey.id' in pesquisa_atual.columns:
                     id_survey_vinculada = pesquisa_atual['survey.id'].values[0]
                     
-            # 2. Agora filtramos a tabela de Surveys usando o ID DA SURVEY (e não o da campanha)
             if id_survey_vinculada is not None and not df_survey_full.empty and 'id' in df_survey_full.columns:
                 df_survey_filtrado = df_survey_full.loc[df_survey_full['id'] == int(id_survey_vinculada)]
                 
@@ -847,7 +772,6 @@ with aba_clima:
         except Exception as e:
             st.error(f"🚨 Erro inesperado ao aplicar o filtro de perguntas: {e}")
 
-        # Tratamento seguro de colunas de contato
         if 'email' not in df_contatos.columns: df_contatos['email'] = ''
         if 'first name' not in df_contatos.columns: df_contatos['first name'] = ''
         if 'last name' not in df_contatos.columns: df_contatos['last name'] = ''
@@ -857,16 +781,13 @@ with aba_clima:
         
         st.markdown("---")
         
-        # --- KPIs CLIMA ---
         col_kpi1_c, col_kpi2_c = st.columns(2)
-        
         col_kpi1_c.markdown(f"""
             <div style="display: flex; flex-direction: column; gap: 0.2rem;">
                 <p style="font-size: 0.9rem; color: #b0b0b0; margin: 0; padding: 0;">📋 Nome da Pesquisa</p>
                 <p style="font-size: 2rem; color: #d884ff; font-weight: 600; margin: 0; padding: 0; line-height: 1.2; white-space: normal; word-wrap: break-word;">{nome_pesquisa}</p>
             </div>
         """, unsafe_allow_html=True)
-        
         col_kpi2_c.metric("📨 Total de Contatos Válidos", len(df_contatos_validos))
 
         # ========================================================
@@ -901,23 +822,22 @@ with aba_clima:
         hub_person_area = {}
         if 'person' in df_areas_f.columns and 'area' in df_areas_f.columns:
             for _, row in df_areas_f.iterrows():
-                p_str = clean_val(row.get('person'))
+                p_str = padronizar_id(pd.Series([row.get('person')]))[0]
                 a_str = clean_val(row.get('area'))
                 hub_person_area[p_str] = mapa_instancias.get(a_str, a_str) 
 
         mapa_nomes_func_global = {}
-        id_col_f = df_func.get('id', pd.Series(dtype=str))
+        id_col_f = padronizar_id(df_func.get('id', pd.Series(dtype=str)))
         nome_col_f = df_func.get('Nome Completo', pd.Series(dtype=str))
         for i, val in zip(id_col_f, nome_col_f):
-            id_str = clean_val(i)
-            mapa_nomes_func_global[id_str] = val
+            mapa_nomes_func_global[i] = val
 
         df_gestores_f = filtrar_por_data(st.session_state.get('df_gestores', pd.DataFrame()), data_pesquisa)
         hub_person_manager = {}
         if 'person' in df_gestores_f.columns and 'manager' in df_gestores_f.columns:
             for _, row in df_gestores_f.iterrows():
-                p_str = clean_val(row.get('person'))
-                m_str = clean_val(row.get('manager'))
+                p_str = padronizar_id(pd.Series([row.get('person')]))[0]
+                m_str = padronizar_id(pd.Series([row.get('manager')]))[0]
                 hub_person_manager[p_str] = mapa_nomes_func_global.get(m_str, "Gestor Desconhecido")
 
         encontrados_email = []
@@ -931,34 +851,20 @@ with aba_clima:
             email_original = row['email']
             
             if e_clean and e_clean in dict_email_hub:
-                hub_id = clean_val(dict_email_hub[e_clean].get('id'))
+                hub_id = padronizar_id(pd.Series([dict_email_hub[e_clean].get('id')]))[0]
                 area_nome = hub_person_area.get(hub_id, "Sem Área")
                 manager_nome = hub_person_manager.get(hub_id, "Sem Gestor")
                 
-                encontrados_email.append({
-                    'Nome completo': nome_original,
-                    'Email': email_original,
-                    'Área': area_nome,
-                    'Gestor': manager_nome
-                })
+                encontrados_email.append({'Nome completo': nome_original, 'Email': email_original, 'Área': area_nome, 'Gestor': manager_nome})
             elif n_clean and n_clean in dict_nome_hub:
                 email_hub = dict_nome_hub[n_clean].get('email', '')
-                hub_id = clean_val(dict_nome_hub[n_clean].get('id'))
+                hub_id = padronizar_id(pd.Series([dict_nome_hub[n_clean].get('id')]))[0]
                 area_nome = hub_person_area.get(hub_id, "Sem Área")
                 manager_nome = hub_person_manager.get(hub_id, "Sem Gestor")
                 
-                encontrados_nome.append({
-                    'Nome completo': nome_original,
-                    'Email no Pesquisas': email_original,
-                    'Email no People Hub': email_hub,
-                    'Área': area_nome,
-                    'Gestor': manager_nome
-                })
+                encontrados_nome.append({'Nome completo': nome_original, 'Email no Pesquisas': email_original, 'Email no People Hub': email_hub, 'Área': area_nome, 'Gestor': manager_nome})
             else:
-                nao_encontrados.append({
-                    'Nome completo': nome_original,
-                    'Email no Pesquisas': email_original
-                })
+                nao_encontrados.append({'Nome completo': nome_original, 'Email no Pesquisas': email_original})
 
         if len(encontrados_email) == len(df_contatos_validos) and len(df_contatos_validos) > 0:
             st.success("✅ Todos os contatos da pesquisa foram encontrados perfeitamente pelo **E-mail** no People Hub.")
@@ -966,7 +872,6 @@ with aba_clima:
             if encontrados_nome:
                 st.warning(f"⚠️ **{len(encontrados_nome)} contato(s)** foram encontrados apenas pelo **Nome** (E-mail estava diferente ou vazio no Hub). Verifique se são as pessoas corretas:")
                 st.dataframe(pd.DataFrame(encontrados_nome).style.apply(cor_fundo_erro, axis=1), hide_index=True)
-                
             if nao_encontrados:
                 st.error(f"🚨 **{len(nao_encontrados)} contato(s)** NÃO FORAM ENCONTRADOS nem por e-mail e nem por nome no People Hub!")
                 st.dataframe(pd.DataFrame(nao_encontrados).style.apply(cor_fundo_erro, axis=1), hide_index=True)
@@ -977,87 +882,161 @@ with aba_clima:
         st.markdown("---")
         st.subheader("2. Validação das Alternativas e Escalas (Choices)")
 
-        def score_sentimento(texto):
-            if pd.isna(texto): return 0
-            texto = str(texto).lower()
-            pos = ['concordo', 'concorda', 'sempre', 'satisfeito', 'bom', 'ótimo', 'otimo', 'excelente', 'totalmente', 'muito', 'bastante', 'identifico']
-            neg = ['discordo', 'discorda', 'nunca', 'insatisfeito', 'ruim', 'péssimo', 'pessimo', 'nada', 'nenhum', 'raramente', 'pouco']
-            score = 0
-            for w in pos: 
-                if w in texto: score += 1
-            for w in neg: 
-                if w in texto: score -= 1
-            if 'não ' in texto or 'nao ' in texto: 
-                score -= 1.5 
-            return score
-
         qtd_erros_perguntas = 0
         lista_problemas_perguntas = []
-
+        
+        perguntas_preparadas = []
         if 'title' in df_choice.columns:
             for _, row in df_choice.iterrows():
                 titulo = row.get('title', 'Pergunta Desconhecida')
                 choices_str = row.get('question_object.choices', '[]')
-                
                 try:
-                    if isinstance(choices_str, str): choices = ast.literal_eval(choices_str)
-                    else: choices = choices_str
+                    choices = ast.literal_eval(choices_str) if isinstance(choices_str, str) else choices_str
                 except:
                     choices = []
 
                 if not isinstance(choices, list) or len(choices) == 0:
                     continue
-                    
-                issues = []
-                valores_vistos = {}
-                descricoes_vistas = {}
+                
                 choices_parsed = []
-
                 for c in choices:
                     val_str = str(c.get('value', ''))
                     desc = str(c.get('description', '')).strip()
-                    
                     try: val_num = float(val_str)
                     except: val_num = None
-                    
                     if val_num is not None:
                         choices_parsed.append({'val': val_num, 'desc': desc})
-                        if val_num < 0:
-                            issues.append(f"Valor negativo encontrado: {val_num} na opção '{desc}'")
-
-                    if val_str in valores_vistos and valores_vistos[val_str] != desc:
-                        issues.append(f"Valor {val_str} está sendo usado para descrições diferentes: '{desc}' e '{valores_vistos[val_str]}'")
-                    elif val_str in valores_vistos and valores_vistos[val_str] == desc:
-                        issues.append(f"Alternativa duplicada exata: '{desc}' com valor {val_str}")
-
-                    if desc in descricoes_vistas and descricoes_vistas[desc] != val_str:
-                        issues.append(f"A descrição '{desc}' possui valores numéricos diferentes associados a ela: {val_str} e {descricoes_vistas[desc]}")
-
-                    valores_vistos[val_str] = desc
-                    descricoes_vistas[desc] = val_str
-
+                
                 if len(choices_parsed) > 1:
                     choices_parsed.sort(key=lambda x: x['val'])
-                    primeira_opcao = choices_parsed[0]['desc']
-                    ultima_opcao = choices_parsed[-1]['desc']
-                    
-                    score_primeira = score_sentimento(primeira_opcao)
-                    score_ultima = score_sentimento(ultima_opcao)
-                    
-                    if score_primeira > score_ultima and (score_primeira > 0 or score_ultima < 0):
-                        issues.append(f"Possível Inversão de Escala! O menor valor ({choices_parsed[0]['val']}) é '{primeira_opcao}' e o maior valor ({choices_parsed[-1]['val']}) é '{ultima_opcao}'.")
+                    escala_formatada = [f"{c['val']} - {c['desc']}" for c in choices_parsed]
+                    perguntas_preparadas.append({
+                        "pergunta": titulo,
+                        "escala_com_valores": escala_formatada
+                    })
 
-                if issues:
-                    qtd_erros_perguntas += 1
-                    for issue in issues:
-                        lista_problemas_perguntas.append({'Nome da Pergunta': titulo, 'Problema': issue})
+        # --- FLUXO DE INTELIGÊNCIA ARTIFICIAL ---
+        if GEMINI_API_KEY and perguntas_preparadas:
+            if not GENAI_INSTALADO:
+                st.error("🚨 A biblioteca `google-generativeai` não está instalada. Execute `pip install google-generativeai` no terminal.")
+            else:
+                with st.spinner("Processando o contexto das perguntas e validando a ordem lógica..."):
+                    try:
+                        genai.configure(api_key=GEMINI_API_KEY)
+                        model = genai.GenerativeModel('gemini-2.5-flash', generation_config={"response_mime_type": "application/json"})
                         
-                    with st.expander(f"❌ Problemas encontrados em: {titulo}", expanded=False):
-                        for issue in issues:
-                            st.markdown(f"- {issue}")
+                        prompt = f"""
+                        Você é um auditor de Experiência do Colaborador validando pesquisas de clima.
+                        Receberá um JSON com perguntas e suas alternativas numéricas associadas.
+                        
+                        Sua tarefa é fazer 2 análises para cada pergunta:
 
-            if qtd_erros_perguntas == 0 and len(df_choice) > 0:
-                st.success("✅ Nenhuma anomalia de valores, duplicatas ou inversão de escala foi encontrada nas perguntas analisadas!")
+                        REGRA 1 - ORDEM DA ESCALA:
+                        A estrutura lógica de pesquisas exige que o menor valor numérico represente SEMPRE a maior discordância/negatividade e o maior valor numérico represente SEMPRE a maior concordância/positividade.
+                        - Verifique se os números das opções quebram essa regra (ex: "Concordo" com valor muito baixo, "Discordo" com valor alto, ou valores repetidos).
+                        - Se quebrarem, erro_ordem_escala = true.
+                        
+                        REGRA 2 - SEMÂNTICA (MAPEAMENTO DE INSATISFAÇÃO PARA DATAOPS):
+                        Identifique se a frase da pergunta tem viés "Positiva" ou "Negativa".
+                        Liste as opções que representam uma atitude negativa/insatisfação.
+                        ATENÇÃO: Opções neutras NUNCA representam insatisfação. Devem ser ignoradas.
+                        - Se a pergunta é Positiva, as respostas de discordância indicam insatisfação.
+                        - Se a pergunta é Negativa, as respostas de concordância indicam insatisfação.
+                        
+                        Dados: {json.dumps(perguntas_preparadas, ensure_ascii=False)}
+                        
+                        Retorne ESTRITAMENTE um array JSON contendo objetos com estas exatas chaves:
+                        "pergunta": (string),
+                        "erro_ordem_escala": (boolean, true ou false),
+                        "detalhe_erro_ordem": (string clara e educativa. Você OBRIGATORIAMENTE deve citar de forma explícita o NOME exato da alternativa e seu VALOR numérico exato que causou o problema. Exemplo: 'A opção "Concordo totalmente" recebeu o valor 1.0, o que está invertido' ou 'O valor 1.0 está repetido nas opções X e Y'. Explique amigavelmente a lógica correta em no máximo 3 frases, ou null se estiver ok),
+                        "polaridade": (string "Positiva" ou "Negativa"),
+                        "opcoes_insatisfacao": (array de strings com os nomes exatos das opções que indicam insatisfação)
+                        """
+                        
+                        resposta_ia = model.generate_content(prompt)
+                        analise_ia = json.loads(resposta_ia.text)
+                        
+                        erros_escala = [item for item in analise_ia if item.get('erro_ordem_escala')]
+                        
+                        st.markdown("#### 🧠 Resultado da Auditoria Inteligente")
+                        
+                        # Bloco 1: Exibição Crítica (Erros de Escala Desordenada/Invertida)
+                        if erros_escala:
+                            st.error(f"🚨 Encontramos {len(erros_escala)} pergunta(s) com a numeração das alternativas errada ou invertida!")
+                            for item in erros_escala:
+                                qtd_erros_perguntas += 1
+                                lista_problemas_perguntas.append({
+                                    'Nome da Pergunta': item['pergunta'],
+                                    'Problema': f"[Ordem da Escala] {item['detalhe_erro_ordem']}"
+                                })
+                                with st.expander(f"⚠️ **Erro em:** {item['pergunta']}", expanded=True):
+                                    st.markdown(f"**O que aconteceu?** {item['detalhe_erro_ordem']}")
+                        else:
+                            st.success("✅ A numeração das alternativas de todas as escalas está perfeitamente em ordem.")
+
+                        # Bloco 2: Mapeamento Semântico para a equipe de DataOps
+                        st.markdown("---")
+                        st.markdown("##### 📌 Mapeamento Semântico (Apoio DataOps)")
+                        st.info("Abaixo estão as opções que indicam **insatisfação** para cada pergunta. Utilize isso como guia para a parametrização dos itens da escala no People Hub.")
+                        
+                        perguntas_positivas = [item for item in analise_ia if item.get('polaridade', 'Positiva') == 'Positiva']
+                        perguntas_negativas = [item for item in analise_ia if item.get('polaridade', 'Positiva') == 'Negativa']
+                        
+                        if perguntas_positivas:
+                            with st.expander(f"🔹 Ver {len(perguntas_positivas)} Perguntas Positivas (Insatisfação = Discordar)", expanded=False):
+                                for item in perguntas_positivas:
+                                    insatisfacao = ", ".join(item.get('opcoes_insatisfacao', []))
+                                    if not insatisfacao: insatisfacao = "Nenhuma identificada"
+                                    st.markdown(f"**{item['pergunta']}**")
+                                    st.markdown(f"↳ *Opções de insatisfação:* `{insatisfacao}`")
+                                    st.markdown("---")
+                                    
+                        if perguntas_negativas:
+                            with st.expander(f"🔻 Ver {len(perguntas_negativas)} Perguntas Negativas (Insatisfação = Concordar)", expanded=False):
+                                for item in perguntas_negativas:
+                                    insatisfacao = ", ".join(item.get('opcoes_insatisfacao', []))
+                                    if not insatisfacao: insatisfacao = "Nenhuma identificada"
+                                    st.markdown(f"**{item['pergunta']}**")
+                                    st.markdown(f"↳ *Opções de insatisfação:* `{insatisfacao}`")
+                                    st.markdown("---")
+                                
+                    except Exception as e:
+                        st.error(f"Erro na análise do motor inteligente: Verifique a conexão. Detalhes: {e}")
+
+        # --- FLUXO PADRÃO (Plano B: Matemática Básica Sem IA) ---
+        elif perguntas_preparadas:
+            def score_sentimento(texto):
+                if pd.isna(texto): return 0
+                texto = str(texto).lower()
+                pos = ['concordo', 'concorda', 'sempre', 'satisfeito', 'bom', 'ótimo', 'otimo', 'excelente', 'totalmente', 'muito', 'bastante', 'identifico']
+                neg = ['discordo', 'discorda', 'nunca', 'insatisfeito', 'ruim', 'péssimo', 'pessimo', 'nada', 'nenhum', 'raramente', 'pouco']
+                score = 0
+                for w in pos: 
+                    if w in texto: score += 1
+                for w in neg: 
+                    if w in texto: score -= 1
+                if 'não ' in texto or 'nao ' in texto: score -= 1.5 
+                return score
+
+            for p in perguntas_preparadas:
+                titulo = p['pergunta']
+                alternativas_texto = [alt.split(' - ', 1)[1] if ' - ' in alt else alt for alt in p['escala_com_valores']]
+                
+                primeira_opcao = alternativas_texto[0]
+                ultima_opcao = alternativas_texto[-1]
+                
+                score_primeira = score_sentimento(primeira_opcao)
+                score_ultima = score_sentimento(ultima_opcao)
+                
+                if score_primeira > score_ultima:
+                    qtd_erros_perguntas += 1
+                    msg = f"Possível Erro na Numeração! O menor valor está atrelado a '{primeira_opcao}' e o maior a '{ultima_opcao}'."
+                    lista_problemas_perguntas.append({'Nome da Pergunta': titulo, 'Problema': msg})
+                    with st.expander(f"❌ Problemas encontrados em: {titulo}", expanded=False):
+                        st.markdown(f"- {msg}")
+
+            if qtd_erros_perguntas == 0 and len(df_choice) > 0 and not GEMINI_API_KEY:
+                st.success("✅ Nenhuma anomalia grave na ordem das alternativas encontrada.")
 
         # ========================================================
         # 4. EXPORTAÇÃO DOS DADOS DA PESQUISA (EXCEL)
@@ -1096,5 +1075,5 @@ with aba_clima:
             data=excel_clima_data, 
             file_name=f"Relatorio_Clima_Campanha_{id_campanha}.xlsx", 
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            width='stretch'
+            use_container_width=True
         )
