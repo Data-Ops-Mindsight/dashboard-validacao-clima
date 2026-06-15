@@ -327,9 +327,9 @@ with aba_estrutura:
             df_funcionarios['Nome Completo'] = (primeiro_nome + " " + ultimo_nome).str.strip()
             df_funcionarios['Nome Completo'] = df_funcionarios['Nome Completo'].replace('', 'Desconhecido')
 
-        id_col = df_funcionarios.get('id', pd.Series(dtype=str))
-        nome_col = df_funcionarios.get('Nome Completo', pd.Series(dtype=str))
-        mapa_nomes_func = dict(zip(id_col, nome_col))
+        # id_col = df_funcionarios.get('id', pd.Series(dtype=str))
+        # nome_col = df_funcionarios.get('Nome Completo', pd.Series(dtype=str))
+        # mapa_nomes_func = dict(zip(id_col, nome_col))
         
         #ativos_ids = set(df_reg_func_filtrado.get('person', pd.Series()).dropna().unique())
 
