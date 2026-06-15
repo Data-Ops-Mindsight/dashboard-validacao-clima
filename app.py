@@ -339,9 +339,19 @@ with aba_estrutura:
         
         ativos_ids = set(padronizar_id(df_reg_func_filtrado.get('person', pd.Series())).unique())
         
+        #mapa_datas_inicio = {}
+        #if 'person' in df_reg_func_filtrado.columns and 'start_date' in df_reg_func_filtrado.columns:
+            #mapa_datas_inicio = df_reg_func_filtrado.groupby('person')['start_date'].max().dt.strftime('%d/%m/%Y').to_dict()
+
         mapa_datas_inicio = {}
         if 'person' in df_reg_func_filtrado.columns and 'start_date' in df_reg_func_filtrado.columns:
-            mapa_datas_inicio = df_reg_func_filtrado.groupby('person')['start_date'].max().dt.strftime('%d/%m/%Y').to_dict()
+            # Temos que usar o ID padronizado como chave do dicionário também
+            df_reg_func_filtrado['person_str'] = padronizar_id(df_reg_func_filtrado['person'])
+            
+            # A CORREÇÃO: Garante que a coluna é um formato de Data/Hora válido antes de fazer a conta
+            df_reg_func_filtrado['start_date'] = pd.to_datetime(df_reg_func_filtrado['start_date'], format='mixed', dayfirst=True, errors='coerce')
+            
+            mapa_datas_inicio = df_reg_func_filtrado.groupby('person_str')['start_date'].max().dt.strftime('%d/%m/%Y').to_dict()
 
         mapa_nome_para_id = dict(zip(df_instancias.get('name', []), df_instancias.get('id', [])))
         def traduzir_area_para_id(val):
