@@ -144,14 +144,15 @@ def load_data(file):
     else: return pd.read_excel(file)
 
 def filtrar_por_data(df, data_ref):
+    """Filtro de data imune a fusos horários e inversões de mês/dia"""
     if df.empty or 'start_date' not in df.columns: 
         return df
     
     df = df.copy()
     data_ref = pd.to_datetime(data_ref).normalize()
     
-    # Converte e arranca fuso horário na marra para não ter conflito de horas
-    df['start_dt'] = pd.to_datetime(df['start_date'], format='mixed', dayfirst=True, errors='coerce')
+    # A MÁGICA: Tiramos o dayfirst=True para ele respeitar o YYYY-MM-DD da API
+    df['start_dt'] = pd.to_datetime(df['start_date'], format='mixed', errors='coerce')
     if df['start_dt'].dt.tz is not None:
         df['start_dt'] = df['start_dt'].dt.tz_localize(None)
     df['start_dt'] = df['start_dt'].dt.normalize()
@@ -159,13 +160,12 @@ def filtrar_por_data(df, data_ref):
     if 'end_date' not in df.columns:
         df['end_dt'] = pd.NaT
     else:
-        df['end_dt'] = pd.to_datetime(df['end_date'], format='mixed', dayfirst=True, errors='coerce')
+        df['end_dt'] = pd.to_datetime(df['end_date'], format='mixed', errors='coerce')
         if df['end_dt'].dt.tz is not None:
             df['end_dt'] = df['end_dt'].dt.tz_localize(None)
         df['end_dt'] = df['end_dt'].dt.normalize()
         
     mask = (df['start_dt'] <= data_ref) & (df['end_dt'].isna() | (df['end_dt'] >= data_ref))
-    
     return df.drop(columns=['start_dt', 'end_dt'])[mask]
 
 def padronizar_id(serie):
@@ -278,34 +278,6 @@ with aba_estrutura:
         df_funcionarios = st.session_state.get('df_funcionarios', pd.DataFrame())
         df_reg_func = st.session_state.get('df_reg_func', pd.DataFrame())
         df_gestores = st.session_state.get('df_gestores', pd.DataFrame())
-
-        # ==========================================
-        # 🕵️ RASTREADOR DE FUNCIONÁRIO (MODO DETETIVE)
-        # ==========================================
-        with st.expander("🕵️ RASTREADOR DE FUNCIONÁRIO (MODO DETETIVE)", expanded=True):
-            st.markdown("Digite o ID do funcionário que está caindo na lista de 'Sem Gestor'/'Sem Área' por engano para ver como ele veio da API:")
-            id_rastreio = st.text_input("ID do Funcionário (ex: 1551)")
-            
-            if id_rastreio:
-                id_rastreio_str = padronizar_id(pd.Series([id_rastreio]))[0]
-                
-                st.write(f"### Raio-X do Funcionário ID: {id_rastreio_str}")
-                
-                if not df_reg_func.empty:
-                    st.write("**1. Contratos (df_reg_func - Bruto)**")
-                    df_r_alvo = df_reg_func[padronizar_id(df_reg_func['person']) == id_rastreio_str]
-                    st.dataframe(df_r_alvo[['person', 'start_date', 'end_date']] if not df_r_alvo.empty else df_r_alvo)
-                
-                if not df_areas_func.empty:
-                    st.write("**2. Áreas (df_areas_func - Bruto)**")
-                    df_a_alvo = df_areas_func[padronizar_id(df_areas_func['person']) == id_rastreio_str]
-                    st.dataframe(df_a_alvo[['person', 'area', 'start_date', 'end_date']] if not df_a_alvo.empty else df_a_alvo)
-                
-                if not df_gestores.empty:
-                    st.write("**3. Gestores (df_gestores - Bruto)**")
-                    df_g_alvo = df_gestores[padronizar_id(df_gestores['person']) == id_rastreio_str]
-                    st.dataframe(df_g_alvo[['person', 'manager', 'start_date', 'end_date']] if not df_g_alvo.empty else df_g_alvo)
-        # ==========================================
         
         df_areas_func_filtrado = filtrar_por_data(df_areas_func, data_pesquisa)
         df_hierarquia_filtrado = filtrar_por_data(df_hierarquia, data_pesquisa)
@@ -334,7 +306,9 @@ with aba_estrutura:
         mapa_datas_inicio = {}
         if 'person' in df_reg_func_filtrado.columns and 'start_date' in df_reg_func_filtrado.columns:
             df_reg_func_filtrado['person_str'] = padronizar_id(df_reg_func_filtrado['person'])
-            df_reg_func_filtrado['start_date'] = pd.to_datetime(df_reg_func_filtrado['start_date'], format='mixed', dayfirst=True, errors='coerce')
+            
+            # Aqui também tiramos o dayfirst=True para a data de inicio aparecer certa na tela
+            df_reg_func_filtrado['start_date'] = pd.to_datetime(df_reg_func_filtrado['start_date'], format='mixed', errors='coerce')
             mapa_datas_inicio = df_reg_func_filtrado.groupby('person_str')['start_date'].max().dt.strftime('%d/%m/%Y').to_dict()
 
         mapa_nome_para_id = dict(zip(df_instancias.get('name', []), df_instancias.get('id', [])))
