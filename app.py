@@ -175,11 +175,21 @@ def load_data(file):
     else: return pd.read_excel(file)
 
 def filtrar_por_data(df, data_ref):
-    if 'start_date' not in df.columns or 'end_date' not in df.columns: return df
+    # Se não existe a data de início, não conseguimos fazer o corte no tempo.
+    if 'start_date' not in df.columns: 
+        return df
+        
     df = df.copy()
     df['start_date'] = pd.to_datetime(df['start_date'], format='mixed', dayfirst=True, errors='coerce')
-    df['end_date'] = pd.to_datetime(df['end_date'], format='mixed', dayfirst=True, errors='coerce')
     data_ref = pd.to_datetime(data_ref)
+    
+    # O Pulo do Gato: Se a API não mandou a coluna 'end_date' (porque ninguém tem data de fim), 
+    # nós criamos a coluna com valores vazios para a matemática não quebrar!
+    if 'end_date' not in df.columns:
+        df['end_date'] = pd.NaT
+    else:
+        df['end_date'] = pd.to_datetime(df['end_date'], format='mixed', dayfirst=True, errors='coerce')
+        
     mask = (df['start_date'] <= data_ref) & (df['end_date'].isna() | (df['end_date'] >= data_ref))
     return df[mask]
 
