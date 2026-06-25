@@ -7,9 +7,19 @@ from typing import Optional
 # ==========================================
 # 🛠️ FUNÇÕES AUXILIARES E MOTOR DA API
 # ==========================================
+# def getFirstName(name: str):
+#    if pd.isna(name) or not isinstance(name, str): return ""
+#    return name.strip().split()[0]
+
+#def getLastName(name: str):
+#    if pd.isna(name) or not isinstance(name, str): return ""
+#    parts = name.strip().split()
+#    return " ".join(parts[1:]) if len(parts) > 1 else ""
+
 def getFirstName(name: str):
     if pd.isna(name) or not isinstance(name, str): return ""
-    return name.strip().split()[0]
+    parts = name.strip().split()
+    return parts[0] if len(parts) > 0 else ""
 
 def getLastName(name: str):
     if pd.isna(name) or not isinstance(name, str): return ""
