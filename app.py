@@ -112,6 +112,7 @@ tenant = st.sidebar.text_input("Tenant do Cliente", placeholder="ex: universal",
 token_hub = st.sidebar.text_input("Token do People Hub", placeholder="Insira o token do Hub", key="input_token_hub")
 token_pesquisas = st.sidebar.text_input("Token do Pesquisas", placeholder="Insira o token de Pesquisas", key="input_token_pesquisas")
 id_campanha = st.sidebar.text_input("ID da Campanha (Pesquisa)", placeholder="ex: 2", key="input_id_campanha")
+id_survey = st.sidebar.text_input("ID da Survey", placeholder="ex: 5", key="input_id_survey") # 👉 NOVA LINHA AQUI
 
 st.sidebar.markdown("---")
 st.sidebar.header("🤖 Auditoria Inteligente")
@@ -689,10 +690,10 @@ with aba_clima:
     st.markdown("### 📥 Importação de Bases da Pesquisa")
     
     if st.button("🚀 Puxar Dados da Pesquisa de Clima", use_container_width=True):
-        if not tenant or not token_pesquisas or not id_campanha:
-            st.warning("⚠️ Por favor, preencha o **Tenant**, o **Token do Pesquisas** e o **ID da Campanha** na barra lateral.")
-        elif not id_campanha.strip().isdigit():
-            st.error("🚨 O **ID da Campanha** deve ser um número inteiro (ex: 123).")
+        if not tenant or not token_pesquisas or not id_campanha or not id_survey:
+            st.warning("⚠️ Por favor, preencha o **Tenant**, o **Token do Pesquisas**, o **ID da Campanha** e o **ID da Survey** na barra lateral.")
+        elif not id_campanha.strip().isdigit() or not id_survey.strip().isdigit():
+            st.error("🚨 Os IDs da **Campanha** e da **Survey** devem ser números inteiros (ex: 123).")
         elif not st.session_state.get('dados_carregados'):
             st.error("🚨 **Atenção:** Você precisa primeiro **Puxar Dados da Estrutura** na aba anterior, pois usaremos os funcionários do Hub para cruzar com a pesquisa!")
         else:
@@ -723,7 +724,9 @@ with aba_clima:
                 hist_clima.markdown(logs_clima, unsafe_allow_html=True)
 
                 with st.spinner("⏳ Baixando **Estrutura da Pesquisa (Surveys)**..."):
-                    st.session_state['df_pesquisa_survey'] = get_pesquisa_survey_api(tenant, token_pesquisas)
+                    # Converte o ID para int e passa para a função
+                    id_survey_int = int(id_survey.strip()) 
+                    st.session_state['df_pesquisa_survey'] = get_pesquisa_survey_api(tenant, token_pesquisas, survey_id=id_survey_int)
                 progresso_clima.progress(100)
                 logs_clima += "✅ Estrutura mapeada com sucesso!<br>"
                 hist_clima.markdown(logs_clima, unsafe_allow_html=True)
