@@ -58,6 +58,10 @@ def get_dataframe_from_api(
     if page_size:
         params['page_size'] = page_size
         
+    # 👉 NOVO: Injeta os kwargs (ex: survey_id) direto nos parâmetros da URL!
+    # Isso não quebra as outras funções, pois se elas não passarem nada, o kwargs estará vazio.
+    params.update(kwargs)
+        
     all_data = []
     url = base_url
     
@@ -292,8 +296,8 @@ def get_pesquisa_survey_api(
         'survey_admin',
         token,
         page_size,
-        max_workers,
-        parallel,
+        max_workers=max_workers,       
+        parallel=parallel,             
         ignore_page_size_limits=ignore_page_size_limits,
         survey_id=survey_id
     )
