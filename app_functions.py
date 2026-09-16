@@ -262,33 +262,9 @@ def get_pesquisa_survey_api(
     parallel: bool = True,
     ignore_page_size_limits: bool = False
 ) -> pd.DataFrame:
-    """
-    Obtém informações das pesquisas via API.
-
-    Parâmetros:
-    -----------
-    tenant : str
-        Nome do tenant.
-    token : str
-        Token de autenticação.
-    survey_id : int, opcional
-        ID da pesquisa (padrão: None).
-    page_size : int, opcional
-        Tamanho da página (padrão: None).
-    max_workers : int, opcional
-        Número máximo de threads paralelas.
-    parallel : bool, opcional
-        Se True, faz requisições em paralelo.
-    ignore_page_size_limits : bool, opcional
-        Se True, ignora limites de tamanho de página.
-
-    Retorna:
-    --------
-    pd.DataFrame
-        DataFrame com as informações das pesquisas.
-    """
-    standard_columns = ['id', 'title', 'description', 'breaks_page_after_description', 'questions.question', 'questions.order', 'questions.comments_allowed',
-       'questions.page_break', 'questions.is_optional', 'questions.title', 'questions.description', 'questions.type']
+    import json
+    
+    standard_columns = ['id', 'title', 'description', 'breaks_page_after_description', 'questions.question', 'questions.order', 'questions.comments_allowed', 'questions.page_break', 'questions.is_optional', 'questions.title', 'questions.description', 'questions.type']
     
     df_survey_api = get_dataframe_from_api(
         'pesquisa',
@@ -296,11 +272,19 @@ def get_pesquisa_survey_api(
         'survey_admin',
         token,
         page_size,
-        max_workers=max_workers,       
-        parallel=parallel,             
+        max_workers=max_workers,
+        parallel=parallel,
         ignore_page_size_limits=ignore_page_size_limits,
         survey_id=survey_id
     )
+    
     if df_survey_api.empty:
-        df_survey_api = pd.DataFrame(columns=standard_columns)
+        return pd.DataFrame(columns=standard_columns)
+        
+    # 👉 O SEGREDO ESTÁ AQUI: Abrir a lista de dicionários para criar a 'questions.title'
+    if 'questions' in df_survey_api.columns:
+        df_survey_api = df_survey_api.explode('questions').reset_index(drop=True)
+        json_survey_api = df_survey_api.to_json(orient='records')
+        df_survey_api = pd.json_normalize(json.loads(json_survey_api))
+        
     return df_survey_api
