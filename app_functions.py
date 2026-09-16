@@ -263,27 +263,41 @@ def get_pesquisa_survey_api(
     ignore_page_size_limits: bool = False
 ) -> pd.DataFrame:
     import json
+    import ast
     
     standard_columns = ['id', 'title', 'description', 'breaks_page_after_description', 'questions.question', 'questions.order', 'questions.comments_allowed', 'questions.page_break', 'questions.is_optional', 'questions.title', 'questions.description', 'questions.type']
+    
+    # 👉 MÁGICA 1: Se temos o ID, batemos direto na rota da pesquisa específica! (Mais rápido e seguro)
+    endpoint = f"survey_admin/{survey_id}" if survey_id else "survey_admin"
     
     df_survey_api = get_dataframe_from_api(
         'pesquisa',
         tenant,
-        'survey_admin',
+        endpoint,
         token,
         page_size,
         max_workers=max_workers,
         parallel=parallel,
-        ignore_page_size_limits=ignore_page_size_limits,
-        survey_id=survey_id
+        ignore_page_size_limits=ignore_page_size_limits
     )
     
     if df_survey_api.empty:
         return pd.DataFrame(columns=standard_columns)
         
-    # 👉 O SEGREDO ESTÁ AQUI: Abrir a lista de dicionários para criar a 'questions.title'
+    # 👉 MÁGICA 2: Garante que a coluna ID seja número inteiro, senão o filtro lá no app.py falha!
+    if 'id' in df_survey_api.columns:
+        df_survey_api['id'] = pd.to_numeric(df_survey_api['id'], errors='coerce')
+
+    # Trata a coluna de perguntas
     if 'questions' in df_survey_api.columns:
+        # 👉 MÁGICA 3: Se as perguntas vieram como texto puro da API, converte para lista real de Python
+        df_survey_api['questions'] = df_survey_api['questions'].apply(
+            lambda x: ast.literal_eval(x) if isinstance(x, str) else x
+        )
+        
+        # Agora o explode vai funcionar perfeitamente
         df_survey_api = df_survey_api.explode('questions').reset_index(drop=True)
+        
         json_survey_api = df_survey_api.to_json(orient='records')
         df_survey_api = pd.json_normalize(json.loads(json_survey_api))
         
